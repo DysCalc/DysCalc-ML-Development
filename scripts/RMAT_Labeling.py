@@ -17,6 +17,7 @@ KEEP_COLUMNS = ["NC_t1", "DM_t1", "NS_t1", "ADD_t1", "SUB_t1", "CA_t1", "RMAT"]
 ## Read and Drop Unusable Columns
 df = pd.read_csv(RAW_DATASET, index_col=False)
 df = df[KEEP_COLUMNS]
+df = df.rename(columns=lambda c: c.removesuffix("_t1") if c != "RMAT" else c)   # remove the _t1 in the column names
 
 ## Label with 1 ("At-Risk") or 0 ("Typical") based on RMAT score
 RMAT_scores = df['RMAT'].to_numpy()
