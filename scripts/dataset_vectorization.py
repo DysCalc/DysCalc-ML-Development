@@ -7,6 +7,7 @@ class Vectorizer:
     def __init__(self, labeled_dataset: Path, normalize: bool = False):
         self.labeled_dataset = labeled_dataset
         self.normalize = normalize
+        self.epsilon = 1e-9
     
     def complete_vector(self, save_df: Path | None = None):
         self._load_dataset()    # Load the labeled dataset
@@ -64,7 +65,7 @@ class Vectorizer:
         return ADD - SUB
     
     def _proc_flue_ratio(self, AF, NP):
-        return AF / (NP + np.finfo(float).eps)
+        return AF / (NP + self.epsilon)
     
     def _normalize(self, col):
         numpy_col = col.to_numpy()
