@@ -10,8 +10,8 @@ class Vectorizer:
         self.epsilon = 1e-9
     
     def complete_vector(self, save_df: Path | None = None):
-        self._load_dataset()    # Load the labeled dataset
-        self._clean_dataset()   # Clean the dataset, remove < 0 values
+        self.df = self._load_dataset()      # Load the labeled dataset
+        self._clean_dataset()               # Clean the dataset, remove < 0 values
 
         # Derived Features
         self.df["NP"] = self._overall_processing_efficiency(self.df['NC'], self.df['DM'])
@@ -34,8 +34,8 @@ class Vectorizer:
 
         return self.df.to_numpy()
 
-    def _load_dataset(self):
-        self.df = pd.read_csv(self.labeled_dataset)
+    def _load_dataset(self) -> pd.DataFrame:
+        return pd.read_csv(self.labeled_dataset)
 
     def _clean_dataset(self):
         for col in self.df.columns:
