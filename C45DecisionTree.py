@@ -7,16 +7,9 @@ from scipy import stats
 
 from node import Node
 
-
 class C45DecisionTree:
 
-    def __init__(
-        self,
-        max_depth: Optional[int] = None,
-        min_samples_split: int = 2,
-        min_samples_leaf: int = 1,
-        conf_fact: float = 0.25,
-    ) -> None:
+    def __init__(self, max_depth: Optional[int] = None, min_samples_split: int = 2, min_samples_leaf: int = 1, conf_fact: float = 0.25) -> None:
         """
         Object template for C4.5 Decision Tree Algorithm for ML.
         :param max_depth: Max
@@ -189,9 +182,7 @@ class C45DecisionTree:
         if self.max_depth is not None and depth >= self.max_depth:
             return default_leaf_node
 
-        best_feature, subsets_X, subsets_y, threshold, gain_ratio = self._best_split(
-            X, y
-        )
+        best_feature, subsets_X, subsets_y, threshold, gain_ratio = self._best_split(X, y)
 
         if (
             (best_feature is None)
@@ -329,3 +320,9 @@ class C45DecisionTree:
             return 1
 
         return self.get_leaves_num(n.left) + self.get_leaves_num(n.right)
+
+
+if __name__ == "__main__":
+    decisionTree = C45DecisionTree()
+
+    decisionTree.print_tree()
