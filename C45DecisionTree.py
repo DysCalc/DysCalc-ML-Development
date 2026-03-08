@@ -1,15 +1,20 @@
 from collections import Counter
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-from node import Node
+from Dataclasses import Node, DiagnosticOutput
 
 class C45DecisionTree:
-
-    def __init__(self, max_depth: Optional[int] = None, min_samples_split: int = 2, min_samples_leaf: int = 1, conf_fact: float = 0.25) -> None:
+    def __init__(self, 
+                 max_depth: Optional[int] = None, 
+                 min_samples_split: int = 2, 
+                 min_samples_leaf: int = 1, 
+                 conf_fact: float = 0.25,
+                 feature_domain_mapping: Optional[Dict[str, str]] = None
+        ) -> None:
         """
         Object template for C4.5 Decision Tree Algorithm for ML.
         :param max_depth: Max
@@ -26,7 +31,12 @@ class C45DecisionTree:
         self.min_samples_leaf: int = min_samples_leaf
         self.conf_fact: float = conf_fact
         self.tree: Optional[Node] = None
-        self.feature_names: list[str] = []
+        self.feature_names: List[str] = []
+        self.feature_domain_mapping: dict[str, str] = feature_domain_mapping or {}
+
+        # Global feature importance calculation
+        self._feature_importance: Dict[str, float] = {}
+        self._total_samples: int = 0
 
         self.epsilon = 1e-9  # to prevent invalid operations by 0
 
@@ -166,8 +176,9 @@ class C45DecisionTree:
     def _build_tree(self, X, y, depth=0):
         """Recursive tree builder."""
         if len(np.unique(y)) == 1:  # Pure Node
+            # Use .iloc[0] because y is a pandas Series that maintains its original index
             return Node(
-                type="leaf", label=y[0], samples=len(y), distribution=Counter(y)
+                type="leaf", label=y.iloc[0], samples=len(y), distribution=Counter(y)
             )
 
         default_leaf_node = Node(
@@ -184,8 +195,7 @@ class C45DecisionTree:
 
         best_feature, subsets_X, subsets_y, threshold, gain_ratio = self._best_split(X, y)
 
-        if (
-            (best_feature is None)
+        if ((best_feature is None)
             or (subsets_X is None)
             or (subsets_y is None)
             or gain_ratio <= 0
@@ -211,92 +221,241 @@ class C45DecisionTree:
         """Prone tree using error-based pruning with cf."""
         if node.type == "leaf":
             return node
-
-        if node.left and node.right:
+        
+        if node.left:
             node.left = self._prune_tree(node.left)
+        
+        if node.right:
             node.right = self._prune_tree(node.right)
 
-            if node.samples:
-                subtree_error = self._calc_subtree_err(
-                    node
-                )  # Calc error if retain subtree
+        if node.samples and node.samples > 0:
+            subtree_error = self._calc_subtree_err(node)  # Calc error if retain subtree
 
-                # Calc error for leaf substitution
-                most_common_class = node.distribution.most_common(1)[0][0]
-                error_as_leaf = node.samples - node.distribution[most_common_class]
+            # Calc error for leaf substitution
+            most_common_class = node.distribution.most_common(1)[0][0]
+            error_as_leaf = node.samples - node.distribution[most_common_class]
+            leaf_error = self._calc_pruning_error(node.samples, error_as_leaf)
 
-                leaf_error = self._calc_pruning_error(node.samples, error_as_leaf)
-                if leaf_error and subtree_error and leaf_error <= subtree_error:
-                    return Node(
-                        type="leaf",
-                        label=most_common_class,
-                        samples=node.samples,
-                        distribution=node.distribution,
-                    )
+            if (leaf_error is not None) and subtree_error and leaf_error <= subtree_error:
+                return Node(
+                    type="leaf",
+                    label=most_common_class,
+                    samples=node.samples,
+                    distribution=node.distribution,
+                )
+            
         return node
 
     def _calc_subtree_err(self, node: Node):
         """Calculate the total error of the subtree."""
-        if node.type == "leaf" and node.samples:
-            most_common_class = node.distribution.most_common(1)[0][0]
-            errors = node.samples - node.distribution[most_common_class]
-            return self._calc_pruning_error(node.samples, errors)
+        if node.type == "leaf":
+            if node.samples and node.samples > 0:
+                most_common_class = node.distribution.most_common(1)[0][0]
+                errors = node.samples - node.distribution[most_common_class]
+                return self._calc_pruning_error(node.samples, errors)
+            return 0
 
-        if node.left and node.right:
-            left_error = self._calc_subtree_err(node.left)
-            right_error = self._calc_subtree_err(node.right)
+        left_error = 0 if node.left is None else self._calc_subtree_err(node.left)
+        right_error = 0 if node.right is None else self._calc_subtree_err(node.right)
 
-            return left_error + right_error
+        return left_error + right_error
+    
+    def _calculate_global_feature_importance(self, node: Node) -> None:
+        """
+        Calculate global feature importance across the entire tree.
+        Importance(F_j) = Σ GainRatio(node_n, F_j) * (|D_n| / |D|)
+        """
+        if node.type == "leaf" or node.feature is None:
+            return
+        
+        # Weight by proportion of samples at this node
+        if node.samples and node.gain_ratio:
+            weight = node.samples / self._total_samples if self._total_samples > 0 else 0
+            weighted_gain = node.gain_ratio * weight
 
-    def fit(self, X: pd.DataFrame, y) -> C45DecisionTree:
+            if node.feature not in self._feature_importance:
+                self._feature_importance[node.feature] = 0
+            
+            self._feature_importance[node.feature] += weighted_gain
+
+            if node.left:
+                self._calculate_global_feature_importance(node.left)
+            
+            if node.right:
+                self._calculate_global_feature_importance(node.right)
+
+    def fit(self, X: pd.DataFrame, y) -> 'C45DecisionTree':
         self.feature_names = X.columns.tolist()
-        X_vals = X.values
+        
+        # Ensure y is a pd.Series and indices align for safe boolean masking
+        if not isinstance(y, pd.Series):
+            y = pd.Series(y)
+            
+        X = X.reset_index(drop=True)
+        y = y.reset_index(drop=True)
+        
+        self._total_samples = len(y)
 
-        y_vals = np.array(y)
-
-        # Build tree
-        self.tree = self._build_tree(X_vals, y_vals)
+        # Build tree keeping it as a pandas object
+        self.tree = self._build_tree(X, y)
 
         # Apply pruning to tree
         if self.tree is not None:
             self.tree = self._prune_tree(self.tree)
 
+            # Calculate global feature importance
+            self._calculate_global_feature_importance(self.tree)
+
         return self
 
-    def predict(self, x, node: Node) -> Optional[str]:
-        if node.type == "leaf":
-            return node.label
+    def _predict_single(self, x: pd.Series, node: Node) -> Tuple[Optional[str], List[Node]]:
+        """
+        Predict a single instance and return the path taken.
+        
+        Returns:
+            (predicted_label, path_nodes)
+        """
+        path = [node]
 
-        feature_value = x[node.feature]
+        while node.type != "leaf":
+            if node.feature is None or node.threshold is None:
+                break
 
-        if node.left and node.right:
-            return (
-                self.predict(x, node.left)
-                if feature_value <= node.threshold
-                else self.predict(x, node.right)
+            feature_value = x[node.feature]
+
+            if feature_value <= node.threshold:
+                if node.left is None:
+                    break
+                node = node.left
+            else:
+                if node.right is None:
+                    break
+                node = node.right
+            
+            path.append(node)
+
+        return node.label if node.type == "leaf" else None, path
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Predict class labels for samples in X.
+        
+        Args:
+            X: DataFrame with same features as training data
+            
+        Returns:
+            Array of predicted class labels
+        """
+        if self.tree is None:
+            raise ValueError("Tree not fitted. Call fit() first.")
+
+        predictions = []
+
+        for _, row in X.iterrows():
+            pred, _ = self._predict_single(row, self.tree)
+            predictions.append(pred)
+        
+        return np.array(predictions)
+    
+    def predict_with_diagnostics(self, X: pd.DataFrame) -> List[DiagnosticOutput]:
+        """
+        Predict with comprehensive diagnostic outputs.
+        
+        Args:
+            X: DataFrame with same features as training data
+            
+        Returns:
+            List of DiagnosticOutput objects, one per sample
+        """
+
+        if self.tree is None:
+            raise ValueError("Tree not fitted. Call fit() first.")
+        
+        diagnostics = []
+        for _, row in X.iterrows():
+            pred, path = self._predict_single(row, self.tree)
+        
+            if pred is None:
+                pred = self.tree.label if (self.tree.type == "leaf" and self.tree.label is not None) else "Unknown"
+                path = [self.tree]
+            
+            leaf_node = path[-1]
+            leaf_dist = dict(leaf_node.distribution)
+            total = sum(leaf_dist.values())
+            confidence = leaf_dist.get(pred, 0) / (total + self.epsilon)
+
+            decision_path = []
+            decision_path_readable_parts = []
+
+            for i in range(len(path) - 1):
+                node, next_node = path[i:i+2]
+
+                if node.feature and node.threshold is not None:
+                    direction = "<=" if next_node == node.left else ">"
+                    decision_path.append((node.feature, node.threshold, direction))
+                    decision_path_readable_parts.append(f"{node.feature} {direction} {node.threshold:.4f}")
+                
+            decision_path_readable = " AND ".join(decision_path_readable_parts)
+            if not decision_path_readable:
+                decision_path_readable = f"Direct classification as {pred}"
+
+            domain_severity = {}
+            for domain in set(self.feature_domain_mapping.values()):
+                domain_severity[domain] = 0.0
+
+            for i in range(len(path) - 1):
+                node = path[i]
+                if node.feature and node.gain_ratio:
+                    domain = self.feature_domain_mapping.get(node.feature)
+                    if domain and domain in domain_severity:
+                        domain_severity[domain] += node.gain_ratio
+            
+            task_importance = {}
+            for feature in self.feature_names:
+                task_importance[feature] = 0.0
+            
+            for i in range(len(path) - 1):
+                node = path[i]
+                if node.feature and node.gain_ratio:
+                    task_importance[node.feature] += node.gain_ratio
+            
+            # Create diagnostic output
+            diagnostic = DiagnosticOutput(
+                predicted_class=pred,
+                confidence=confidence,
+                decision_path=decision_path,
+                decision_path_readable=decision_path_readable,
+                domain_severity_scores=domain_severity,
+                task_importance_scores=task_importance,
+                leaf_distribution=leaf_dist,
             )
+            
+            diagnostics.append(diagnostic)
 
-        return None
+        return diagnostics
 
-    def print_tree(
-        self, node: Optional[Node] = None, depth: int = 0, prefix: str = ""
-    ) -> None:
+    def get_feature_importance(self) -> dict[str, float]:
+        """
+        Get global feature importance scores.
+        
+        Returns:
+            Dictionary mapping feature names to importance scores
+        """
+        return self._feature_importance.copy()
+    
+    def print_tree(self, node: Optional[Node] = None, depth: int = 0, prefix: str = "") -> None:
         node = self.tree if node is None else node
 
         if node:
             if node.type == "leaf":
                 dist = dict(node.distribution)
-                print(
-                    f"{prefix}Leaf: class = {node.label}, samples = {node.samples}, distribution = {dist}"
-                )
+                print(f"{prefix}Leaf: class = {node.label}, samples = {node.samples}, distribution = {dist}")
             else:
-                print(
-                    f"{prefix}{node.feature} <= {node.threshold:.4f} (GR: {node.gain_ratio:.4f}, samples: {node.samples})"
-                )
+                print(f"{prefix}{node.feature} <= {node.threshold:.4f} (GR: {node.gain_ratio:.4f}, samples: {node.samples})")
                 self.print_tree(node.left, depth + 1, f"{prefix} L: ")
                 self.print_tree(node.right, depth + 1, f"{prefix} R: ")
 
-    def get_depth(self, node: Node | None = None) -> int:
+    def get_depth(self, node: Optional[Node] = None) -> int:
         """Get the depth of the tree."""
         n = self.tree if node is None else node
 
@@ -308,7 +467,7 @@ class C45DecisionTree:
 
         return 1 + max(left_depth, right_depth)
 
-    def get_leaves_num(self, node: Node | None = None) -> int:
+    def get_leaves_num(self, node: Optional[Node] = None) -> int:
         """Get the number of leaves in the tree."""
 
         n = self.tree if node is None else node
