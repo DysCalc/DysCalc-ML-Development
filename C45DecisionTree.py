@@ -4,6 +4,7 @@ from typing import Optional, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 from scipy import stats
+import pickle
 
 from Dataclasses import Node, DiagnosticOutput
 
@@ -479,7 +480,41 @@ class C45DecisionTree:
             return 1
 
         return self.get_leaves_num(n.left) + self.get_leaves_num(n.right)
+    
+    def save_model(self, filepath: str, optimal_threshold: float = 0.50):
+        """
+        Serializes and saves the trained Decision Tree and its calibrated threshold.
+        """
+        import pickle
+        
+        model_package = {
+            'model': self,
+            'optimal_threshold': optimal_threshold
+        }
+        
+        with open(filepath, 'wb') as file:
+            pickle.dump(model_package, file)
+            
+        print(f"Model successfully saved to {filepath}")
+        print(f"Locked pedagogical threshold: {optimal_threshold}")
 
+    @classmethod
+    def load_model(cls, filepath: str):
+        """
+        Loads a serialized Decision Tree and returns the model and threshold.
+        """
+        import pickle
+        
+        with open(filepath, 'rb') as file:
+            loaded_package = pickle.load(file)
+            
+        loaded_tree = loaded_package['model']
+        optimal_threshold = loaded_package['optimal_threshold']
+        
+        print(f"Model successfully loaded from {filepath}")
+        print(f"Operating at threshold: {optimal_threshold}")
+        
+        return loaded_tree, optimal_threshold
 
 if __name__ == "__main__":
     decisionTree = C45DecisionTree()
