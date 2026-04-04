@@ -3,6 +3,17 @@ import os
 from sklearn.model_selection import train_test_split
 from sdv.single_table import CopulaGANSynthesizer 
 from sdv.metadata import SingleTableMetadata
+import random
+import torch
+import numpy as np
+
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+os.environ['PYTHONHASHSEED'] = str(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 
 df = pd.read_csv('dataset/complete_vector.csv')
 
@@ -35,9 +46,9 @@ folder_name = 'dataset'
 if not os.path.exists(folder_name):
     os.makedirs(folder_name)
 
-balanced_train_df.to_csv(f"{folder_name}/balanced_complete_vector_train.csv", index=False)
-test_df.to_csv(f"{folder_name}/complete_vector_test.csv", index=False)
+#balanced_train_df.to_csv(f"{folder_name}/balanced_complete_vector_train.csv", index=False)
+#test_df.to_csv(f"{folder_name}/complete_vector_test.csv", index=False)
 
 print("\nSuccess! Files saved in the 'dataset' folder:")
 print("1. 'balanced_complete_vector_train.csv'") # 85% of the original students, contains synthetic data
-print("2. 'complete_vector_test.csv'") # git statusremaining 15% of the original, untouched students. to avoid data leakage
+print("2. 'complete_vector_test.csv'") # remaining 15% of the original, untouched students. to avoid data leakage
