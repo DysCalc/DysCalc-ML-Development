@@ -1,36 +1,53 @@
+import logging
 from collections import Counter
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-import pickle
+
 
 from Dataclasses import Node, DiagnosticOutput
 
+logger = logging.getLogger(__name__)
+
 class C45DecisionTree:
     def __init__(self, 
-                 max_depth: Optional[int] = None, 
-                 min_samples_split: int = 2, 
-                 min_samples_leaf: int = 1, 
-                 conf_fact: float = 0.25,
-                 feature_domain_mapping: Optional[Dict[str, str]] = None
+            max_depth: Optional[int] = None, 
+            min_samples_split: int = 2, 
+            min_samples_leaf: int = 1, 
+            conf_fact: float = 0.25,
+            min_gain_ratio: float = 1e-3,
+            max_thresholds: Optional[int] = None,
+            feature_domain_mapping: Optional[Dict[str, str]] = None
         ) -> None:
         """
-        Object template for C4.5 Decision Tree Algorithm for ML.
-        :param max_depth: Max
+        C4.5 Decision Tree classifier with error-based pruning and diagnostic support.
+
+        :param max_depth: Maximum depth of the tree. None means unlimited.
         :type max_depth: int | None
-        :param min_samples_split: Description
+        :param min_samples_split: Minimum number of samples required to split an internal node.
         :type min_samples_split: int
-        :param min_samples_leaf: Description
+        :param min_samples_leaf: Minimum number of samples required to be at a leaf node.
         :type min_samples_leaf: int
-        :param conf_fact: Description
+        :param conf_fact: Confidence factor for error-based pruning (lower = more pruning).
         :type conf_fact: float
+        :param min_gain_ratio: Minimum gain ratio required to accept a split.
+        :type min_gain_ratio: float
+        :param max_thresholds: Max candidate thresholds to evaluate per feature per node.
+            Thresholds are sampled via quantiles. Reduces training time on large/augmented datasets.
+            Set to None to evaluate all unique midpoints (original behaviour).
+        :type max_thresholds: int | None
+        :param feature_domain_mapping: Maps feature names to domain group labels for
+            domain-level severity scoring in diagnostics.
+        :type feature_domain_mapping: dict[str, str] | None
         """
         self.max_depth: Optional[int] = max_depth
         self.min_samples_split: int = min_samples_split
         self.min_samples_leaf: int = min_samples_leaf
         self.conf_fact: float = conf_fact
+        self.min_gain_ratio: float = min_gain_ratio
+        self.max_thresholds: Optional[int] = max_thresholds
         self.tree: Optional[Node] = None
         self.feature_names: List[str] = []
         self.feature_domain_mapping: dict[str, str] = feature_domain_mapping or {}
@@ -38,8 +55,13 @@ class C45DecisionTree:
         # Global feature importance calculation
         self._feature_importance: Dict[str, float] = {}
         self._total_samples: int = 0
+        self._n_classes: int = 0
 
         self.epsilon = 1e-9  # to prevent invalid operations by 0
+
+        self.raw_features: List[str] = []
+        self.diagnostic_features: List[str] = []
+        self.feature_stats: Dict[str, Dict[str, float]] = {}
 
     def _entropy(self, y) -> float:
         """Calculate Entropy(X) = -∑ p_i * log2(p_i)"""
@@ -109,23 +131,33 @@ class C45DecisionTree:
         return upper_limit * n_samples
 
     def _split(self, X, y, feature: str):
-        """Split data on a continuous feature by finding best threshold"""
+        """Split data on a continuous feature by finding best threshold.
+ 
+        Candidate thresholds are midpoints between consecutive unique values,
+        capped at self.max_thresholds via quantile sampling to keep training
+        fast on large or augmented datasets.
+        """
         unique_values = np.unique(X[feature])
 
         if len(unique_values) <= 1:
-            return None, None, None
+            return None, None, None, None, None
 
         # Try thresholds between consecutive values
-        thresholds = [
-            (unique_values[i] + unique_values[i + 1]) / 2
-            for i in range(len(unique_values) - 1)
-        ]
+        all_midpoints = (unique_values[:-1] + unique_values[1:]) / 2
+        
+        # Cap threshold candidates using quantile sampling if max_thresholds is set
+        if self.max_thresholds is not None and len(all_midpoints) > self.max_thresholds:
+            quantiles = np.linspace(0, 100, self.max_thresholds)
+            thresholds = np.unique(np.percentile(all_midpoints, quantiles))
+        else:
+            thresholds = all_midpoints
 
-        best_gr = -float("inf")
-        best_threshold = None
-        best_subset_X = None
-        best_subset_y = None
-
+        curr_gr = -float("inf")
+        curr_ig = 0.0
+        curr_threshold = None
+        curr_subset_X = None
+        curr_subset_y = None
+        
         for threshold in thresholds:
             mask_left = X[feature] <= threshold
             mask_right = X[feature] > threshold
@@ -133,54 +165,52 @@ class C45DecisionTree:
             subsets_y = [y[mask_left], y[mask_right]]
 
             # Skip if split creates subset < self.min_samples_leaf
-            if (
-                len(subsets_y[0]) < self.min_samples_leaf
-                or len(subsets_y[1]) < self.min_samples_leaf
-            ):
+            if (len(subsets_y[0]) < self.min_samples_leaf or len(subsets_y[1]) < self.min_samples_leaf):
                 continue
 
             gr = self._gain_ratio(y, subsets_y)
+            ig = self._information_gain(y, subsets_y)
 
-            if gr > best_gr:
-                best_gr = gr
-                best_threshold = threshold
-                best_subset_X = [X[mask_left], X[mask_right]]
-                best_subset_y = subsets_y
+            if gr > curr_gr:
+                curr_gr = gr
+                curr_ig = ig
+                curr_threshold = threshold
+                curr_subset_X = [X[mask_left], X[mask_right]]
+                curr_subset_y = subsets_y
 
-        return best_subset_X, best_subset_y, best_threshold
+        return curr_subset_X, curr_subset_y, curr_threshold, curr_gr, curr_ig
 
     def _best_split(self, X: pd.DataFrame, y):
         """Find the best feature to split on using gain ratio"""
 
         best_gr = -float("inf")
+        best_ig = 0.0
         best_feature = None
         best_subset_X = None
         best_subset_y = None
         best_threshold = None
 
         for feature in X.columns:
-            subset_X, subset_y, threshold = self._split(X, y, feature)
+            subset_X, subset_y, threshold, gr, ig = self._split(X, y, feature)
 
             if subset_X is None:
                 continue
-
-            gr = self._gain_ratio(y, subset_y)
-
-            if gr > best_gr:
+            
+            if (gr is not None) and (gr > best_gr) and (gr > self.min_gain_ratio):
                 best_gr = gr
+                best_ig = ig
                 best_feature = feature
                 best_subset_X = subset_X
                 best_subset_y = subset_y
                 best_threshold = threshold
-        return best_feature, best_subset_X, best_subset_y, best_threshold, best_gr
+
+        return best_feature, best_subset_X, best_subset_y, best_threshold, best_gr, best_ig
 
     def _build_tree(self, X, y, depth=0):
         """Recursive tree builder."""
         if len(np.unique(y)) == 1:  # Pure Node
             # Use .iloc[0] because y is a pandas Series that maintains its original index
-            return Node(
-                type="leaf", label=y.iloc[0], samples=len(y), distribution=Counter(y)
-            )
+            return Node(type="leaf", label=y.iloc[0], samples=len(y), distribution=Counter(y))
 
         default_leaf_node = Node(
             type="leaf",
@@ -194,13 +224,9 @@ class C45DecisionTree:
         if self.max_depth is not None and depth >= self.max_depth:
             return default_leaf_node
 
-        best_feature, subsets_X, subsets_y, threshold, gain_ratio = self._best_split(X, y)
+        best_feature, subsets_X, subsets_y, threshold, gain_ratio, info_gain = self._best_split(X, y)
 
-        if ((best_feature is None)
-            or (subsets_X is None)
-            or (subsets_y is None)
-            or gain_ratio <= 0
-        ):  # No valid split found
+        if ((best_feature is None) or (subsets_X is None) or (subsets_y is None) or (gain_ratio <= self.min_gain_ratio)):  # No valid split found
             return default_leaf_node
 
         # Recursively build children
@@ -213,6 +239,7 @@ class C45DecisionTree:
             samples=len(y),
             feature=best_feature,
             gain_ratio=gain_ratio,
+            information_gain=info_gain,
             threshold=threshold,
             left=left,
             right=right,
@@ -237,7 +264,7 @@ class C45DecisionTree:
             error_as_leaf = node.samples - node.distribution[most_common_class]
             leaf_error = self._calc_pruning_error(node.samples, error_as_leaf)
 
-            if (leaf_error is not None) and subtree_error and leaf_error <= subtree_error:
+            if (leaf_error is not None) and (subtree_error is not None) and (leaf_error <= subtree_error):
                 return Node(
                     type="leaf",
                     label=most_common_class,
@@ -285,27 +312,46 @@ class C45DecisionTree:
             if node.right:
                 self._calculate_global_feature_importance(node.right)
 
-    def fit(self, X: pd.DataFrame, y) -> 'C45DecisionTree':
-        self.feature_names = X.columns.tolist()
-        
-        # Ensure y is a pd.Series and indices align for safe boolean masking
+    def fit(self, X: pd.DataFrame, y, raw_features: List[str]) -> 'C45DecisionTree':
+        """
+        Fit the C4.5 tree on raw features, while computing feature stats over
+        the full feature set for use in diagnostics.
+ 
+        :param X: Full feature DataFrame (raw + diagnostic features).
+        :param y: Target labels.
+        :param raw_features: Subset of X.columns to use for training the tree.
+        """
+        self.raw_features = raw_features
+        self.diagnostic_features = X.columns.tolist()
+
+        X_train = X[raw_features].copy()
+
         if not isinstance(y, pd.Series):
             y = pd.Series(y)
-            
-        X = X.reset_index(drop=True)
+
+        X_train = X_train.reset_index(drop=True)
         y = y.reset_index(drop=True)
-        
+
         self._total_samples = len(y)
+        self._n_classes = len(y.unique())
 
-        # Build tree keeping it as a pandas object
-        self.tree = self._build_tree(X, y)
+        for col in X.columns:
+            self.feature_stats[col] = {
+                "mean": X[col].mean(),
+                "std": X[col].std() + self.epsilon
+            }
 
-        # Apply pruning to tree
+        self.tree = self._build_tree(X_train, y)
+
         if self.tree is not None:
             self.tree = self._prune_tree(self.tree)
-
-            # Calculate global feature importance
             self._calculate_global_feature_importance(self.tree)
+
+            # Normalize importance
+            total = sum(self._feature_importance.values())
+            if total > 0:
+                for k in self._feature_importance:
+                    self._feature_importance[k] /= total
 
         return self
 
@@ -335,7 +381,11 @@ class C45DecisionTree:
             
             path.append(node)
 
-        return node.label if node.type == "leaf" else None, path
+        if node.type != "leaf":
+            majority = Counter(node.distribution).most_common(1)[0][0]
+            return majority, path
+
+        return node.label, path
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """
@@ -347,6 +397,8 @@ class C45DecisionTree:
         Returns:
             Array of predicted class labels
         """
+        X = X[self.raw_features]
+
         if self.tree is None:
             raise ValueError("Tree not fitted. Call fit() first.")
 
@@ -380,11 +432,18 @@ class C45DecisionTree:
                 pred = self.tree.label if (self.tree.type == "leaf" and self.tree.label is not None) else "Unknown"
                 path = [self.tree]
             
+            # --- Confidence (Eq. 3.34) ---
+            # P(y = c | Xi) = n_c / (n_At-Risk + n_Typical) from leaf node purity.
+            # A +1 Laplace correction is applied to avoid P=1.0 on pure leaves
+            # that have never observed the minority class — noted as a refinement
+            # over the base formula in the proposal.
             leaf_node = path[-1]
             leaf_dist = dict(leaf_node.distribution)
             total = sum(leaf_dist.values())
-            confidence = leaf_dist.get(pred, 0) / (total + self.epsilon)
-
+            confidence = (leaf_dist.get(pred, 0) + 1) / (total + self._n_classes)
+            
+            # --- Decision path (Eq. 3.38) ---
+            # Pathi = {(Fn_j, θn_j, dir_n_j), ...}
             decision_path = []
             decision_path_readable_parts = []
 
@@ -400,38 +459,75 @@ class C45DecisionTree:
             if not decision_path_readable:
                 decision_path_readable = f"Direct classification as {pred}"
 
-            domain_severity = {}
-            for domain in set(self.feature_domain_mapping.values()):
-                domain_severity[domain] = 0.0
+            # --- Diagnostic scoring (Eq. 3.35 / 3.36) ---
+            # wn = information_gain at node n  (Eq. 3.35 definition)
+            # DSi,d   = Σ wn * z * I(feature ∈ domain d)   — domain severity
+            # TaskImp = Σ GainRatio(n, t) * z * I(split_on_task_t)  — Eq. 3.36
+            domain_severity = {d: 0.0 for d in set(self.feature_domain_mapping.values())}
+            task_importance = {f: 0.0 for f in self.diagnostic_features}
 
             for i in range(len(path) - 1):
                 node = path[i]
-                if node.feature and node.gain_ratio:
-                    domain = self.feature_domain_mapping.get(node.feature)
+
+                if node.feature and (node.information_gain is not None) and (node.gain_ratio is not None):
+                    feature = node.feature
+                    value = row[feature]
+
+                    feat_stats = self.feature_stats.get(feature)
+                    if feat_stats:
+                        z = abs((value - feat_stats["mean"]) / (feat_stats["std"] + self.epsilon))
+
+                        # Eq. 3.36 — task importance uses gain ratio as the weight
+                        task_importance[feature] += node.gain_ratio * z
+
+                        # Eq. 3.35 — domain severity uses information gain (wn) as the weight
+                        domain = self.feature_domain_mapping.get(feature)
+                        if domain and domain in domain_severity:
+                            domain_severity[domain] += node.information_gain * z
+
+            # --- Post-path scoring for derived/diagnostic features (Eq. 3.35 extension) ---
+            # Derived features (NP, SN, AF, BC, AS, PF) never appear as tree split nodes,
+            # so they receive no weight from the path loop above.
+            # We score them independently using their z-score alone (weight=1.0),
+            # which measures how anomalous the student's derived value is relative
+            # to the training population — consistent with the proposal's intent that
+            # these features "enhance interpretability and capture domain-specific deficits".
+            derived_features = [f for f in self.diagnostic_features if f not in self.raw_features]
+            for feature in derived_features:
+                feat_stats = self.feature_stats.get(feature)
+                if feat_stats:
+                    value = row[feature]
+                    z = abs((value - feat_stats["mean"]) / (feat_stats["std"] + self.epsilon))
+ 
+                    # task importance: z-score only (no gain ratio available)
+                    task_importance[feature] += z
+ 
+                    # domain severity: z-score contributes to the feature's domain
+                    domain = self.feature_domain_mapping.get(feature)
                     if domain and domain in domain_severity:
-                        domain_severity[domain] += node.gain_ratio
-            
-            task_importance = {}
-            for feature in self.feature_names:
-                task_importance[feature] = 0.0
-            
-            for i in range(len(path) - 1):
-                node = path[i]
-                if node.feature and node.gain_ratio:
-                    task_importance[node.feature] += node.gain_ratio
-            
-            # Create diagnostic output
-            diagnostic = DiagnosticOutput(
-                predicted_class=pred,
+                        domain_severity[domain] += z
+
+            # Normalize domain severity
+            total_domain = sum(domain_severity.values())
+            if total_domain > 0:
+                for d in domain_severity:
+                    domain_severity[d] /= total_domain
+
+            # Normalize task importance
+            total_task = sum(task_importance.values())
+            if total_task > 0:
+                for f in task_importance:
+                    task_importance[f] /= total_task
+
+            diagnostics.append(DiagnosticOutput(
+                predicted_class=str(pred),
                 confidence=confidence,
                 decision_path=decision_path,
                 decision_path_readable=decision_path_readable,
                 domain_severity_scores=domain_severity,
                 task_importance_scores=task_importance,
                 leaf_distribution=leaf_dist,
-            )
-            
-            diagnostics.append(diagnostic)
+            ))
 
         return diagnostics
 
@@ -495,8 +591,8 @@ class C45DecisionTree:
         with open(filepath, 'wb') as file:
             pickle.dump(model_package, file)
             
-        print(f"Model successfully saved to {filepath}")
-        print(f"Locked pedagogical threshold: {optimal_threshold}")
+        logger.info(f"Model successfully saved to {filepath}")
+        logger.info(f"Locked threshold: {optimal_threshold}")
 
     @classmethod
     def load_model(cls, filepath: str):
@@ -511,12 +607,11 @@ class C45DecisionTree:
         loaded_tree = loaded_package['model']
         optimal_threshold = loaded_package['optimal_threshold']
         
-        print(f"Model successfully loaded from {filepath}")
-        print(f"Operating at threshold: {optimal_threshold}")
+        logger.info(f"Model successfully loaded from {filepath}")
+        logger.info(f"Operating at threshold: {optimal_threshold}")
         
         return loaded_tree, optimal_threshold
 
 if __name__ == "__main__":
     decisionTree = C45DecisionTree()
-
     decisionTree.print_tree()

@@ -38,16 +38,49 @@ class Vectorizer:
         return pd.read_csv(self.labeled_dataset)
 
     def _clean_dataset(self):
+        # =========================
+        # 1. Replace known invalid sentinels
+        # =========================
+        self.df = self.df.replace([-99], np.nan)
+
+        # =========================
+        # 2. Ensure numeric safety (no negatives allowed in this dataset)
+        # =========================
         for col in self.df.columns:
             if col == "Label":
                 continue
 
-            # compute median excluding < 0
-            valid = self.df[col][self.df[col] >= 0]
-            median = valid.median()
+            self.df.loc[self.df[col] < 0, col] = np.nan
 
-            # replace < 0 with median
-            self.df.loc[self.df[col] < 0, col] = median
+        # =========================
+        # 3. Group-aware median imputation (better for Label imbalance)
+        # =========================
+        feature_cols = [c for c in self.df.columns if c != "Label"]
+
+        self.df[feature_cols] = self.df.groupby("Label")[feature_cols].transform(
+            lambda x: x.fillna(x.median())
+        )
+
+        # fallback (in case a whole class column is NaN)
+        self.df = self.df.fillna(self.df.median(numeric_only=True))
+
+        # =========================
+        # 4. IQR CLIPPING (prevents extreme distortion in derived features)
+        # =========================
+        for col in feature_cols:
+            Q1 = self.df[col].quantile(0.25)
+            Q3 = self.df[col].quantile(0.75)
+            IQR = Q3 - Q1
+
+            lower = Q1 - 1.5 * IQR
+            upper = Q3 + 1.5 * IQR
+
+            self.df[col] = self.df[col].clip(lower, upper)
+
+        # =========================
+        # 5. Final sanity check
+        # =========================
+        self.df = self.df.reset_index(drop=True)
 
     def _overall_processing_efficiency(self, NC, DM):
         return (NC + DM) / 2

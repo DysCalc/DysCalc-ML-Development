@@ -13,6 +13,7 @@ class Node:
    samples: Optional[int] = None
    feature: Optional[str] = None
    gain_ratio: Optional[float] = None
+   information_gain: Optional[float] = None
    threshold: Optional[float] = None
    # Children
    left: Optional["Node"] = None
