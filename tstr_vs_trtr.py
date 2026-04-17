@@ -42,16 +42,16 @@ FUNA_DB_DOMAIN_MAPPING: Dict[str, str] = {
 }
 FUNA_DB_RAW_FEATURES: List[str] = [
     "NC", "DM", "NS", "ADD", "SUB", "CA",
-    "NC_incomplete", "DM_incomplete", "NS_incomplete",
-    "ADD_incomplete", "SUB_incomplete", "CA_incomplete",
-    "any_incomplete",
+    # "NC_incomplete", "DM_incomplete", "NS_incomplete",
+    # "ADD_incomplete", "SUB_incomplete", "CA_incomplete",
+    # "any_incomplete",
 ]
 FUNA_DB_DIAGNOSTIC_FEATURES: List[str] = [
     "NC", "DM", "NS", "ADD", "SUB", "CA",
     "NP", "SN", "AF", "BC", "AS", "PF",
-    "NC_incomplete", "DM_incomplete", "NS_incomplete",
-    "ADD_incomplete", "SUB_incomplete", "CA_incomplete",
-    "any_incomplete",
+    # "NC_incomplete", "DM_incomplete", "NS_incomplete",
+    # "ADD_incomplete", "SUB_incomplete", "CA_incomplete",
+    # "any_incomplete",
 ]
 
 # Features that signal missing/incomplete data.
@@ -293,7 +293,7 @@ print('\n' + '═' * 60)
 print('PHASE 1: Threshold Sweep (trained on TRTR, evaluated on val)')
 print('═' * 60)
 
-THRESHOLDS = np.arange(0.25, 0.76, 0.05).round(2)
+THRESHOLDS = np.arange(0.35, 0.76, 0.05).round(2)
 
 sweep_tree = C45DecisionTree(**best_params, feature_domain_mapping=FUNA_DB_DOMAIN_MAPPING)
 sweep_tree.fit(X_train_trtr, y_train_trtr, raw_features=FUNA_DB_RAW_FEATURES)
@@ -319,7 +319,7 @@ for thresh in THRESHOLDS:
 # Pick best threshold by F2 (recall-weighted)
 sweep_df       = pd.DataFrame(sweep_results)
 best_row       = sweep_df.loc[sweep_df['fbeta'].idxmax()]
-BEST_THRESHOLD = 0.35 #float(best_row['threshold'])
+BEST_THRESHOLD = float(best_row['threshold'])
 
 print(f'\n✔ Best threshold by F2: {BEST_THRESHOLD:.2f}')
 print(f'  Recall={best_row["recall"]:.4f}, Precision={best_row["precision"]:.4f}, '
@@ -359,7 +359,7 @@ for thresh in THRESHOLDS:
 
 tstr_sweep_df        = pd.DataFrame(tstr_sweep_results)
 tstr_best_row        = tstr_sweep_df.loc[tstr_sweep_df['fbeta'].idxmax()]
-TSTR_BEST_THRESHOLD  = 0.35 # float(tstr_best_row['threshold'])
+TSTR_BEST_THRESHOLD  = float(tstr_best_row['threshold'])
 
 print(f'\n✔ TSTR best threshold by F2: {TSTR_BEST_THRESHOLD:.2f}')
 print(f'  Recall={tstr_best_row["recall"]:.4f}, Precision={tstr_best_row["precision"]:.4f}, '
@@ -651,3 +651,5 @@ elif prec_gain > 0 and rec_loss > 0.05:
 else:
     print(f'    ℹ No precision gain from raising threshold — '
           f'keep TRTR threshold ({BEST_THRESHOLD:.2f}) for TSTR model too.')
+    
+print(f"Global Importance: {tstr_final_tree.get_feature_importance()}")

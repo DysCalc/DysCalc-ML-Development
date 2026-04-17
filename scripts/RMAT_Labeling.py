@@ -1,14 +1,13 @@
 # Convert the raw FUNA_DB dataset to a dataset for supervised learning
 
 import os
-import gc
 from pathlib import Path
 import pandas as pd
 import numpy as np
 
 ## Configs
 BASE_DIR = Path(__file__).resolve().parent
-DATASET_DIR = BASE_DIR.parent / 'dataset'
+DATASET_DIR = BASE_DIR.parent / 'datasets'
 os.makedirs(DATASET_DIR, exist_ok=True)
 RAW_DATASET = DATASET_DIR / 'FUNADB_rawdata_SUPPL.csv'
 LABELED_DATASET = DATASET_DIR / 'FUNADB_labled.csv'
