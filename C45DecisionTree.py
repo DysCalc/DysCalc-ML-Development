@@ -324,6 +324,12 @@ class C45DecisionTree:
         self.raw_features = raw_features
         self.diagnostic_features = X.columns.tolist()
 
+        # Reset state so re-fitting the same object doesn't accumulate importance scores across multiple fit() calls.
+        self._feature_importance = {}
+        self._total_samples = 0
+        self._n_classes = 0
+        self.feature_stats = {}
+
         X_train = X[raw_features].copy()
 
         if not isinstance(y, pd.Series):
@@ -577,15 +583,17 @@ class C45DecisionTree:
 
         return self.get_leaves_num(n.left) + self.get_leaves_num(n.right)
     
-    def save_model(self, filepath: str, optimal_threshold: float = 0.50):
+    def save_model(self, filepath: str, optimal_threshold: float = 0.50, calibrator=None):
         """
-        Serializes and saves the trained Decision Tree and its calibrated threshold.
+        Serializes and saves the trained Decision Tree, its calibrated threshold,
+        and an optional isotonic calibrator.
         """
         import pickle
         
         model_package = {
             'model': self,
-            'optimal_threshold': optimal_threshold
+            'optimal_threshold': optimal_threshold,
+            'calibrator': calibrator,
         }
         
         with open(filepath, 'wb') as file:
@@ -593,11 +601,13 @@ class C45DecisionTree:
             
         logger.info(f"Model successfully saved to {filepath}")
         logger.info(f"Locked threshold: {optimal_threshold}")
-
+        logger.info(f"Calibrator: {'included' if calibrator is not None else 'not provided'}")
+ 
     @classmethod
     def load_model(cls, filepath: str):
         """
-        Loads a serialized Decision Tree and returns the model and threshold.
+        Loads a serialized Decision Tree and returns the model, threshold,
+        and calibrator (None if not saved).
         """
         import pickle
         
@@ -606,11 +616,13 @@ class C45DecisionTree:
             
         loaded_tree = loaded_package['model']
         optimal_threshold = loaded_package['optimal_threshold']
+        calibrator = loaded_package.get('calibrator', None)
         
         logger.info(f"Model successfully loaded from {filepath}")
         logger.info(f"Operating at threshold: {optimal_threshold}")
+        logger.info(f"Calibrator: {'loaded' if calibrator is not None else 'not found'}")
         
-        return loaded_tree, optimal_threshold
+        return loaded_tree, optimal_threshold, calibrator
 
 if __name__ == "__main__":
     decisionTree = C45DecisionTree()
