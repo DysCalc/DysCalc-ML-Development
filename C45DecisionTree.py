@@ -515,15 +515,13 @@ class C45DecisionTree:
 
             # Normalize domain severity
             total_domain = sum(domain_severity.values())
-            if total_domain > 0:
-                for d in domain_severity:
-                    domain_severity[d] /= total_domain
+            for d in domain_severity:
+                domain_severity[d] = float(domain_severity[d] / total_domain) if total_domain > 0 else float(domain_severity[d])
 
             # Normalize task importance
             total_task = sum(task_importance.values())
-            if total_task > 0:
-                for f in task_importance:
-                    task_importance[f] /= total_task
+            for f in task_importance:
+                task_importance[f] = float(task_importance[f] / total_task) if total_task > 0 else float(task_importance[f])
 
             diagnostics.append(DiagnosticOutput(
                 predicted_class=str(pred),
