@@ -9,8 +9,8 @@ import numpy as np
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = BASE_DIR.parent / 'datasets'
 os.makedirs(DATASET_DIR, exist_ok=True)
-RAW_DATASET = DATASET_DIR / 'FUNADB_rawdata_SUPPL.csv'
-LABELED_DATASET = DATASET_DIR / 'FUNADB_labled.csv'
+RAW_DATASET = DATASET_DIR / 'raw' / 'FUNADB_rawdata_SUPPL.csv'
+LABELED_DATASET = DATASET_DIR / 'processed' / 'FUNADB_labled.csv'
 KEEP_COLUMNS = ["NC_t1", "DM_t1", "NS_t1", "ADD_t1", "SUB_t1", "CA_t1", "RMAT"]
 
 ## Read and Drop Unusable Columns

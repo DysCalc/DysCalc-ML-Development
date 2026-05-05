@@ -1,9 +1,13 @@
 import numpy as np
 import pandas as pd
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from typing import Dict, List, Optional
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import fbeta_score, f1_score, recall_score, precision_score, accuracy_score
-from C45DecisionTree import C45DecisionTree
+from src.C45DecisionTree import C45DecisionTree
 from sklearn.isotonic import IsotonicRegression
 from pathlib import Path
 
@@ -231,7 +235,7 @@ def print_variance_inspection(label: str, fold_records: list[dict]):
 # -----------------------------
 print('Loading 70/15/15 Datasets...')
 BASE_DIR = Path(__file__).resolve().parent
-DATASET_DIR = BASE_DIR.parent / "datasets"
+DATASET_DIR = BASE_DIR.parent / "datasets" / "processed"
 
 r_train = pd.read_csv(DATASET_DIR / "train.csv")
 s_train = pd.read_csv(DATASET_DIR / "s_train.csv")

@@ -7,7 +7,7 @@ import pandas as pd
 from scipy import stats
 
 
-from Dataclasses import Node, DiagnosticOutput
+from src.Dataclasses import Node, DiagnosticOutput
 
 logger = logging.getLogger(__name__)
 

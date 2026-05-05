@@ -24,13 +24,16 @@ Dependencies
 import argparse
 import logging
 import sys
+import os
 from pathlib import Path
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import fbeta_score, precision_score, recall_score, f1_score, accuracy_score
 
-from C45DecisionTree import C45DecisionTree
+from src.C45DecisionTree import C45DecisionTree
 
 # ─────────────────────────────────────────────
 # Logging
@@ -153,7 +156,7 @@ def demonstrate_model(model_path: str) -> None:
     loaded_tree, optimal_threshold, calibrator = C45DecisionTree.load_model(model_path)
 
     # 2. Load unseen test data
-    test_df = load_csv("datasets/test_deployment.csv", "test (unseen)")
+    test_df = load_csv("datasets/processed/test_deployment.csv", "test (unseen)")
     X_test, y_test = split_xy(test_df)
 
     # 3. Generate raw predictions & compute probabilities
@@ -198,11 +201,11 @@ def train(out_path: str, use_synth: bool, threshold: float) -> None:
 
     # ── 1. Load data ──────────────────────────────────────────
     log.info("\n[1/4] Loading datasets...")
-    r_train = load_csv("datasets/train_deployment.csv", "real train")
-    val_df  = load_csv("datasets/val_deployment.csv",   "validation")
+    r_train = load_csv("datasets/processed/train_deployment.csv", "real train")
+    val_df  = load_csv("datasets/processed/val_deployment.csv",   "validation")
 
     if use_synth:
-        s_train  = load_csv("datasets/s_train_deployment.csv", "synthetic train")
+        s_train  = load_csv("datasets/processed/s_train_deployment.csv", "synthetic train")
         train_df = pd.concat([r_train, s_train], ignore_index=True)
         mode     = "TSTR"
     else:
