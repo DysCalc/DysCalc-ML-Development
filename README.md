@@ -34,19 +34,18 @@ dyscalc-ml-development/
 ├── notebooks/
 │   ├── dataset_analysis.ipynb            # Exploratory data analysis
 │   ├── ML_development.ipynb              # ML Model development and testing
-│   └── synthetic_data_generation.ipynb   # Synthetic data generation experiments
+│   ├── synthetic_data_generation.ipynb   # Synthetic data generation experiments
+│   └── tstr_vs_trtr.ipynb                # Full TSTR vs TRTR evaluation pipeline
 │
 ├── outputs/
 │   ├── figures/                          # Saved tree visualization
 │   └── logs_and_metrics/          
-│       ├── missing_rates.json            # Per-class missing value rates per feature
-│       └── tstr_trtr_output.txt          # Full console output from tstr_vs_trtr.py
+│       └── missing_rates.json            # Per-class missing value rates per feature
 │   
 │
 ├── scripts/
 │   ├── RMAT_Labeling.py                  # Converts raw FunaDB data to labeled dataset
-│   ├── train.py                          # Deployment training and model saving script
-│   └── tstr_vs_trtr.py                   # Full TSTR vs TRTR evaluation pipeline
+│   └── train.py                          # Deployment training and model saving script
 │
 └── src/                                  
     ├── __init__.py                       # Module initialization
@@ -146,8 +145,8 @@ C45DecisionTree(
 ```python
 BEST_PARAMS = {
     "conf_fact":        0.25,
-    "min_samples_leaf": 3,
-    "max_depth":        10,
+    "min_samples_leaf": 10,
+    "max_depth":        5,
 }
 ```
 
@@ -177,8 +176,8 @@ Importance(F_j) = Σ GainRatio(node_n, F_j) * (|D_n| / |D|)
 | `get_feature_importance()` | Return the global feature importance dictionary. |
 | `get_depth()` | Return the depth of the fitted tree. |
 | `get_leaves_num()` | Return the number of leaf nodes. |
-| `save_model(filepath, optimal_threshold, calibrator)` | Serialize the model package (tree + threshold + calibrator) to a `.pkl` file via `pickle`. |
-| `C45DecisionTree.load_model(filepath)` | Class method. Load and return `(tree, optimal_threshold, calibrator)` from a `.pkl` file. |
+| `save_model(filepath, optimal_threshold)` | Serialize the model package (tree + threshold) to a `.pkl` file via `pickle`. |
+| `C45DecisionTree.load_model(filepath)` | Class method. Load and return `(tree, optimal_threshold)` from a `.pkl` file. |
 
 ### DiagnosticOutput
 
@@ -206,12 +205,12 @@ Both scores are normalized to sum to 1 per prediction.
 
 ## Training Pipeline
 
-### Evaluation: `tstr_vs_trtr.py`
+### Evaluation: `notebooks/tstr_vs_trtr.ipynb`
 
-Runs the full 6-phase evaluation comparing TSTR and TRTR. This script is used for research and model selection — not deployment.
+Runs the full 6-phase evaluation comparing TSTR and TRTR. This notebook is used for research and model selection — not deployment.
 
 **Phases:**
-1. **Threshold sweep** — selects classification threshold via F2-score maximization on the validation set.
+1. **Threshold sweep** — selects classification threshold via F2-score maximization on the validation set using raw tree probabilities.
 2. **Cross-validation** — 5-fold stratified CV on real data; synthetic rows pinned to every training fold (never validation folds).
 3. **CV summary comparison** — side-by-side TRTR vs TSTR metric table.
 4. **Fold variance inspection** — per-fold breakdown with correlation analysis.
@@ -238,9 +237,9 @@ python train.py --threshold 0.35 --out models/funa_c45_v1.pkl
 **Training steps:**
 1. Loads real training data and (optionally) synthetic data.
 2. Trains a C4.5 tree with fixed deployment hyperparameters.
-3. Fits an **isotonic regression calibrator** on the training set probabilities.
-4. Evaluates on the validation set at the provided threshold (informational only).
-5. Saves the model package (tree + threshold + calibrator) to disk.
+3. Evaluates on the validation set at the provided threshold (informational only).
+4. Evaluates on the held-out test set at the provided threshold.
+5. Saves the model package (tree + threshold) to disk.
 6. Runs a demonstration on `test_deployment.csv`, printing metrics and 10 sample diagnostics.
 
 **Output `.pkl` structure:**
@@ -248,7 +247,6 @@ python train.py --threshold 0.35 --out models/funa_c45_v1.pkl
 {
     'model':             C45DecisionTree,   # fitted tree
     'optimal_threshold': float,             # locked classification threshold
-    'calibrator':        IsotonicRegression # probability calibrator
 }
 ```
 
@@ -279,34 +277,34 @@ Full results and interpretation are in `documentation/TSTR_results.md`. Key find
 
 | Metric | TRTR | TSTR | Δ |
 |---|---|---|---|
-| Recall | 0.4989 ± 0.0836 | 0.6332 ± 0.1315 | **+0.1342** |
-| Precision | 0.6082 ± 0.0769 | 0.6650 ± 0.1839 | +0.0568 |
-| F1 | 0.5430 ± 0.0661 | 0.6176 ± 0.0731 | +0.0746 |
-| F2 | 0.5148 ± 0.0757 | 0.6178 ± 0.0748 | **+0.1030** |
+| Recall | 0.5832 ± 0.0885 | 0.6458 ± 0.0841 | **+0.0626** |
+| Precision | 0.6671 ± 0.0614 | 0.6061 ± 0.1188 | -0.0610 |
+| F1 | 0.6194 ± 0.0677 | 0.6127 ± 0.0416 | -0.0068 |
+| F2 | 0.5965 ± 0.0793 | 0.6295 ± 0.0574 | **+0.0330** |
 
 ### Test Set (n=54, threshold=0.35)
 
 | Metric | TRTR | TSTR |
 |---|---|---|
-| Recall | **0.7619** | 0.7143 |
-| Precision | 0.6667 | **0.7143** |
-| F1 | 0.7111 | **0.7143** |
-| Accuracy | 0.7593 | **0.7778** |
+| Recall | 0.5714 | **0.6667** |
+| Precision | **0.7059** | 0.6087 |
+| F1 | 0.6316 | **0.6364** |
+| Accuracy | **0.7407** | 0.7037 |
 
-At n=54, one misclassified sample = 0.048 metric swing. The test results are a **statistical tie**. The more meaningful signal is **CV-to-test drift**: TRTR's CV recall (+0.26 drift) significantly underestimated its true performance, while TSTR's CV recall (+0.08 drift) was a reliable predictor — making TSTR's evaluation pipeline the more trustworthy basis for model selection.
+At n=54, one misclassified sample = 0.048 metric swing. Removing the flawed probability calibrator resolved the massive CV-to-test drift seen previously. Both models now show highly consistent performance between CV and Test (drift < 2.5%). **TSTR** is the clear winner for deployment, as the synthetic data successfully boosted the true Recall (+9.5%) and F2-Score (+6.0%) on the held-out test set compared to the Real-Only model.
 
 ### Feature Importance (TSTR Tree)
 
 | Feature | Importance | Domain |
 |---|---|---|
-| ADD | 0.3285 | Single-Digit Addition |
-| DM | 0.3242 | Digit-Dot Matching |
-| NC | 0.2759 | Number Comparison |
-| SUB | 0.0553 | Single-Digit Subtraction |
-| NS | 0.0162 | Number Series |
+| NC | 0.4928 | Number Comparison |
+| NS | 0.2584 | Number Series |
+| ADD | 0.1876 | Single-Digit Addition |
+| SUB | 0.0612 | Single-Digit Subtraction |
+| DM | ~0.000 | Digit-Dot Matching |
 | CA | ~0.000 | Multi-Digit Arithmetic |
 
-Three features — **ADD, DM, and NC** — account for 93% of split importance. The tree ignored all incomplete/timeout flags as split nodes.
+Four features — **NC, NS, ADD, and SUB** — account for 100% of split importance. The tree ignored all incomplete/timeout flags as split nodes.
 
 ---
 
@@ -346,11 +344,7 @@ Before running the ML scripts, you must generate the split datasets and syntheti
 
 ### 3. Run TSTR vs TRTR evaluation
 
-```bash
-python scripts/tstr_vs_trtr.py
-```
-
-Runs the full 6-phase evaluation. Expects the split CSVs to be present in `datasets/`.
+Open and execute `notebooks/tstr_vs_trtr.ipynb` in your IDE or Jupyter environment. This runs the full 6-phase evaluation in parallel. Expects the split CSVs to be present in `datasets/processed/`.
 
 ### 4. Train the deployment model
 
@@ -367,19 +361,16 @@ from src.C45DecisionTree import C45DecisionTree
 import pandas as pd
 
 # Load the model package
-tree, threshold, calibrator = C45DecisionTree.load_model("models/funa_c45.pkl")
+tree, threshold = C45DecisionTree.load_model("models/v1.pkl")
 
 # Load deployment data
-df = pd.read_csv("dataset/processed/test_deployment.csv")
+df = pd.read_csv("datasets/processed/test_deployment.csv")
 X = df[["NC", "DM", "NS", "ADD", "SUB", "CA", "NP", "SN", "AF", "BC", "AS", "PF"]]
 
 # Run prediction with diagnostic breakdown
 diagnostics = tree.predict_with_diagnostics(X)
+# In production, use the tree's raw confidence for probabilities
 probs = [d.confidence if int(d.predicted_class) == 1 else 1 - d.confidence for d in diagnostics]
-
-# Apply probability calibration
-if calibrator:
-    probs = calibrator.transform(probs)
 
 predictions = [1 if p >= threshold else 0 for p in probs]
 
