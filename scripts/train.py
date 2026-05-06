@@ -2,7 +2,7 @@
 train.py — Deployment Training Script
 ======================================
 Trains the final C4.5 TSTR model on the full real + synthetic training set,
-fits an isotonic calibrator, and saves the complete model package to disk.
+and saves the complete model package to disk.
 
 Usage
 -----
@@ -13,7 +13,7 @@ Usage
 Output
 ------
     <out>.pkl     — pickled model package via tree.save_model()
-                    contains: model, optimal_threshold, calibrator
+                    contains: model, optimal_threshold
 
 Dependencies
 ------------
@@ -24,13 +24,15 @@ Dependencies
 import argparse
 import logging
 import sys
+import os
 from pathlib import Path
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pandas as pd
-from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import fbeta_score, precision_score, recall_score, f1_score, accuracy_score
 
-from C45DecisionTree import C45DecisionTree
+from src.C45DecisionTree import C45DecisionTree
 
 # ─────────────────────────────────────────────
 # Logging
@@ -77,8 +79,8 @@ LABEL_COL = "Label"
 # ─────────────────────────────────────────────
 BEST_PARAMS = {
     "conf_fact":        0.25,
-    "min_samples_leaf": 3,
-    "max_depth":        10,
+    "min_samples_leaf": 10,
+    "max_depth":        5,
 }
 
 # ─────────────────────────────────────────────
@@ -113,16 +115,6 @@ def get_probs(tree: C45DecisionTree, X: pd.DataFrame) -> list[float]:
     return probs
 
 
-def fit_calibrator(probs: list[float], y: pd.Series) -> IsotonicRegression:
-    cal = IsotonicRegression(out_of_bounds="clip")
-    cal.fit(probs, y)
-    return cal
-
-
-def calibrate(calibrator: IsotonicRegression, probs: list[float]) -> list[float]:
-    return calibrator.transform(probs)
-
-
 def compute_metrics(y_true, probs: list[float], threshold: float) -> dict:
     preds = [1 if p >= threshold else 0 for p in probs]
     return {
@@ -151,21 +143,15 @@ def demonstrate_model(model_path: str) -> None:
     log.info("=" * 60)
 
     # 1. Load the model from disk
-    loaded_tree, optimal_threshold, calibrator = C45DecisionTree.load_model(model_path)
+    loaded_tree, optimal_threshold = C45DecisionTree.load_model(model_path)
 
     # 2. Load unseen test data
-    test_df = load_csv("datasets/test_deployment.csv", "test (unseen)")
+    test_df = load_csv("datasets/processed/test_deployment.csv", "test (unseen)")
     X_test, y_test = split_xy(test_df)
 
-    # 3. Generate raw predictions & compute probabilities
+    # 3. Generate predictions and raw tree probabilities
     diagnostics = loaded_tree.predict_with_diagnostics(X_test)
-    raw_probs = get_probs(loaded_tree, X_test)
-
-    # 4. Calibrate probabilities 
-    if calibrator is not None:
-        final_probs = calibrate(calibrator, raw_probs)
-    else:
-        final_probs = raw_probs
+    final_probs = get_probs(loaded_tree, X_test)
 
     test_metrics = compute_metrics(y_test, final_probs, optimal_threshold)
     print_metrics(f"Test metrics at locked threshold={optimal_threshold:.2f}", test_metrics, optimal_threshold)
@@ -182,7 +168,7 @@ def demonstrate_model(model_path: str) -> None:
 
         log.info(f"\n  Test Case #{i+1}:")
         log.info(f"    Raw Confidence   : {diag.confidence:.4f} (Class {diag.predicted_class})")
-        log.info(f"    Final Cal. Prob. : {prob:.4f}")
+        log.info(f"    P(at-risk)       : {prob:.4f}")
         log.info(f"    Final Prediction : {pred_label}")
         log.info(f"    Decision Path    : {diag.decision_path_readable}")
         log.info(f"    Domain Severity  : {diag.domain_severity_scores}")
@@ -198,50 +184,54 @@ def train(out_path: str, use_synth: bool, threshold: float) -> None:
     log.info("=" * 60)
 
     # ── 1. Load data ──────────────────────────────────────────
-    log.info("\n[1/4] Loading datasets...")
-    r_train = load_csv("datasets/train_deployment.csv", "real train")
-    val_df  = load_csv("datasets/val_deployment.csv",   "validation")
+    log.info("\n[1/5] Loading datasets...")
+    r_train = load_csv("datasets/processed/train_deployment.csv", "real train")
+    val_df  = load_csv("datasets/processed/val_deployment.csv",   "validation")
+    test_df = load_csv("datasets/processed/test_deployment.csv",  "test")
 
     if use_synth:
-        s_train  = load_csv("datasets/s_train_deployment.csv", "synthetic train")
+        s_train  = load_csv("datasets/processed/s_train_deployment.csv", "synthetic train")
         train_df = pd.concat([r_train, s_train], ignore_index=True)
-        mode     = "TSTR"
+        mode     = "Synthetic-Augmented"
     else:
         train_df = r_train.copy()
-        mode     = "TRTR"
+        mode     = "Real-Only"
 
     log.info(f"Mode         : {mode}")
     log.info(f"Train shape  : {train_df.shape}")
     log.info(f"Val shape    : {val_df.shape}")
+    log.info(f"Test shape   : {test_df.shape}")
 
     X_train, y_train = split_xy(train_df)
     X_val,   y_val   = split_xy(val_df)
+    X_test,  y_test  = split_xy(test_df)
 
     # ── 2. Train tree ─────────────────────────────────────────
-    log.info("\n[2/4] Training C4.5 decision tree...")
+    log.info("\n[2/5] Training C4.5 decision tree...")
     tree = C45DecisionTree(**BEST_PARAMS, feature_domain_mapping=DOMAIN_MAPPING)
     tree.fit(X_train, y_train, raw_features=RAW_FEATURES)
+
     log.info(f"Tree depth  : {tree.get_depth()}")
     log.info(f"Tree leaves : {tree.get_leaves_num()}")
 
-    # ── 3. Fit calibrator on training set ─────────────────────
-    # Calibrator is fitted on training probabilities so the validation
-    # set is kept clean for evaluation only.
-    log.info("\n[3/4] Fitting isotonic calibrator on training set...")
-    train_probs_raw = get_probs(tree, X_train)
-    calibrator      = fit_calibrator(train_probs_raw, y_train)
-
-    # Evaluate on val at the provided threshold (informational only)
-    val_probs_cal = calibrate(calibrator, get_probs(tree, X_val))
-    val_metrics   = compute_metrics(y_val, val_probs_cal, threshold)
+    # ── 3. Evaluate validation set ────────────────────────────
+    log.info("\n[3/5] Evaluating validation set with raw tree probabilities...")
+    val_probs   = get_probs(tree, X_val)
+    val_metrics = compute_metrics(y_val, val_probs, threshold)
     print_metrics(f"Validation metrics at threshold={threshold:.2f}", val_metrics, threshold)
 
-    # ── 4. Save model ─────────────────────────────────────────
-    log.info("\n[4/4] Saving model...")
+    # ── 4. Evaluate test set ──────────────────────────────────
+    log.info("\n[4/5] Evaluating held-out test set with raw tree probabilities...")
+    test_probs   = get_probs(tree, X_test)
+    test_metrics = compute_metrics(y_test, test_probs, threshold)
+    print_metrics(f"Test metrics at threshold={threshold:.2f}", test_metrics, threshold)
+
+    # ── 5. Save model ─────────────────────────────────────────
+    log.info("\n[5/5] Saving model...")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    tree.save_model(str(out), optimal_threshold=threshold, calibrator=calibrator)
+    tree.save_model(str(out), optimal_threshold=threshold)
     log.info(f"Model saved → {out.resolve()}")
     log.info("\nDone.")
 

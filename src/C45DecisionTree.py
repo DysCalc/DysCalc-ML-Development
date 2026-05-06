@@ -7,7 +7,7 @@ import pandas as pd
 from scipy import stats
 
 
-from Dataclasses import Node, DiagnosticOutput
+from src.Dataclasses import Node, DiagnosticOutput
 
 logger = logging.getLogger(__name__)
 
@@ -581,17 +581,15 @@ class C45DecisionTree:
 
         return self.get_leaves_num(n.left) + self.get_leaves_num(n.right)
     
-    def save_model(self, filepath: str, optimal_threshold: float = 0.50, calibrator=None):
+    def save_model(self, filepath: str, optimal_threshold: float = 0.50):
         """
-        Serializes and saves the trained Decision Tree, its calibrated threshold,
-        and an optional isotonic calibrator.
+        Serializes and saves the trained Decision Tree and locked threshold.
         """
         import pickle
         
         model_package = {
             'model': self,
             'optimal_threshold': optimal_threshold,
-            'calibrator': calibrator,
         }
         
         with open(filepath, 'wb') as file:
@@ -599,13 +597,11 @@ class C45DecisionTree:
             
         logger.info(f"Model successfully saved to {filepath}")
         logger.info(f"Locked threshold: {optimal_threshold}")
-        logger.info(f"Calibrator: {'included' if calibrator is not None else 'not provided'}")
  
     @classmethod
     def load_model(cls, filepath: str):
         """
-        Loads a serialized Decision Tree and returns the model, threshold,
-        and calibrator (None if not saved).
+        Loads a serialized Decision Tree and returns the model and threshold.
         """
         import pickle
         
@@ -614,13 +610,11 @@ class C45DecisionTree:
             
         loaded_tree = loaded_package['model']
         optimal_threshold = loaded_package['optimal_threshold']
-        calibrator = loaded_package.get('calibrator', None)
         
         logger.info(f"Model successfully loaded from {filepath}")
         logger.info(f"Operating at threshold: {optimal_threshold}")
-        logger.info(f"Calibrator: {'loaded' if calibrator is not None else 'not found'}")
         
-        return loaded_tree, optimal_threshold, calibrator
+        return loaded_tree, optimal_threshold
 
 if __name__ == "__main__":
     decisionTree = C45DecisionTree()
