@@ -26,8 +26,10 @@ dyscalc-ml-development/
 │       └── s_train_deployment.csv        # Deployment synthetic training split
 │
 ├── documentation/
+│   ├── dataset_analysis.md               # Summary of EDA and missingness strategies
+│   ├── synthetic_data_generation.md      # Analysis of GAN minority oversampling
 │   └── TSTR_results.md                   # Full TSTR vs TRTR evaluation report
-|
+│
 ├── models/
 │   └── v1.pkl                            # Saved deployment models (.pkl)
 │
@@ -38,11 +40,11 @@ dyscalc-ml-development/
 │   └── tstr_vs_trtr.ipynb                # Full TSTR vs TRTR evaluation pipeline
 │
 ├── outputs/
-│   ├── figures/                          # Saved tree visualization
+│   ├── figures/                          # Auto-generated tree visualizations (SVGs)
 │   └── logs_and_metrics/          
-│       └── missing_rates.json            # Per-class missing value rates per feature
+│       ├── missing_rates.json            # Per-class missing value rates per feature
+│       └── train_output.txt              # Captured logs and sample test diagnostics from train.py
 │   
-│
 ├── scripts/
 │   ├── RMAT_Labeling.py                  # Converts raw FunaDB data to labeled dataset
 │   └── train.py                          # Deployment training and model saving script
@@ -240,7 +242,8 @@ python train.py --threshold 0.35 --out models/funa_c45_v1.pkl
 3. Evaluates on the validation set at the provided threshold (informational only).
 4. Evaluates on the held-out test set at the provided threshold.
 5. Saves the model package (tree + threshold) to disk.
-6. Runs a demonstration on `test_deployment.csv`, printing metrics and 10 sample diagnostics.
+6. Automatically exports a scalable SVG visualization of the decision tree using Graphviz to `outputs/figures/`.
+7. Runs a demonstration on `test_deployment.csv`, printing metrics and 10 sample diagnostics.
 
 **Output `.pkl` structure:**
 ```python
@@ -310,10 +313,11 @@ Four features — **NC, NS, ADD, and SUB** — account for 100% of split importa
 
 ## Dependencies
 
-You can install all required packages via requirements.txt:
+You can install all required packages via requirements.txt. Note that exporting tree visualizations requires the `graphviz` system binary in addition to the Python package:
 
 ```
 pip install -r requirements.txt
+# Ensure graphviz is installed on your OS, e.g., sudo apt-get install graphviz
 ```
 
 ---
