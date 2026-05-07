@@ -1,93 +1,139 @@
 # TSTR vs. TRTR Evaluation Report
-**Model:** C4.5 Decision Tree | **Dataset:** FunaDB Dyscalculia Screening | **Threshold:** 0.35 | **CV:** 5-Fold Stratified | **Split:** 70/15/15
+
+**Model:** Custom C4.5 Decision Tree  
+**Dataset:** FunaDB Dyscalculia Screening  
+**Evaluation notebook:** `notebooks/tstr_vs_trtr.ipynb`  
+**Split:** 70/15/15 stratified real-data split  
+**CV:** 5-fold stratified CV on real rows, with synthetic rows appended only to TSTR training folds
 
 ---
 
 ## Overview
 
-This report explains the end-to-end results of a Train-on-Synthetic Test-on-Real (TSTR) evaluation benchmarked against a Train-on-Real Test-on-Real (TRTR) baseline. A custom C4.5 decision tree was trained across six phases to evaluate whether augmenting the real training set with 58 synthetic at-risk samples improves the identification of dyscalculia-risk students on unseen real data. The evaluation removes any probability calibration (e.g. Isotonic Regression) to prevent mathematical artifacts from obscuring true performance.
+This report summarizes the current Train-on-Synthetic Test-on-Real (TSTR) evaluation against a Train-on-Real Test-on-Real (TRTR) baseline. The benchmark uses raw tree probabilities directly, without probability calibration, and selects model settings through a validation grid search followed by CV tie-breaking.
+
+The current repo writes the full search artifacts to `outputs/grid_search/` and visualization summaries to `outputs/figures/`.
 
 ---
 
 ## Dataset Composition
 
-| Split | Rows | Composition |
-|---|---|---|
-| TRTR Train | 250 | Real only |
-| TSTR Train | 308 | 250 real + 58 synthetic (class 1) |
-| Validation | 54 | Real only |
-| Test | 54 | Real only |
+| Split | Rows | Class Distribution | Composition |
+|---|---:|---|---|
+| TRTR train | 250 | 154 typical / 96 at-risk | Real only |
+| TSTR train | 308 | 154 typical / 154 at-risk | 250 real + 58 synthetic at-risk |
+| Validation | 54 | 33 typical / 21 at-risk | Real only |
+| Test | 54 | 33 typical / 21 at-risk | Real only |
 
-The synthetic data consists exclusively of class-1 (at-risk) samples. These 58 rows are pinned to every TSTR training fold during cross-validation — they never appear in any validation fold. 
-
----
-
-## Phase 1 — Threshold Selection
-
-Both conditions independently swept thresholds to maximize F2-score on the validation set using raw tree probabilities. A threshold of **0.35** was selected. At 0.35, the model requires genuine confidence before predicting class 1, preventing artificial recall inflation.
+The 58 synthetic rows are class-1 at-risk samples. During TSTR cross-validation, they are pinned to every training fold and never placed in validation folds.
 
 ---
 
-## Phase 2 & 3 — Cross-Validation Results
+## Hyperparameter and Threshold Search
 
-5-fold stratified CV was conducted over real samples only. For TSTR, synthetic rows were appended to each training fold.
+The notebook searches:
 
-| Metric | TRTR (mean±std) | TSTR (mean±std) | Δ (TSTR - TRTR) |
-|---|---|---|---|
-| **Recall** | 0.5832 ± 0.0885 | 0.6458 ± 0.0841 | **+0.0626** |
-| **Precision** | 0.6671 ± 0.0614 | 0.6061 ± 0.1188 | -0.0610 |
-| **F1-Score** | 0.6194 ± 0.0677 | 0.6127 ± 0.0416 | -0.0068 |
-| **F2-Score** | 0.5965 ± 0.0793 | 0.6295 ± 0.0574 | **+0.0330** |
-| **Accuracy** | 0.7280 ± 0.0371 | 0.6840 ± 0.0612 | -0.0440 |
+| Parameter | Values |
+|---|---|
+| `conf_fact` | 0.10 to 0.50 in 0.05 increments |
+| `min_samples_leaf` | 10 to 50 |
+| `max_depth` | 5 to 15 |
+| `threshold` | 0.35 to 0.75 in 0.05 increments |
 
-**Insight:** TSTR yields a solid ~6.3% boost in Recall during cross-validation, improving the F2-score without sacrificing much F1 stability. 
+Each condition evaluates 4,059 hyperparameter combinations across 9 thresholds, producing 36,531 validation evaluations per condition.
+
+### Best Validation Results
+
+| Condition | F2 | Recall | Precision | Threshold | Params |
+|---|---:|---:|---:|---:|---|
+| TRTR | 0.8108 | 0.8571 | 0.6667 | 0.35 | `conf_fact=0.25`, `min_samples_leaf=10`, `max_depth=5` |
+| TSTR | 0.8491 | 0.8571 | 0.8182 | 0.35-0.60 tied | validation-best ties include several settings |
+
+Because many TSTR candidates tie on validation F2, the notebook resolves tied candidates using cross-validation.
+
+### CV Tie Resolution
+
+| Condition | Selected Threshold | Selected Params | Tie Candidates |
+|---|---:|---|---:|
+| TRTR | 0.35 | `conf_fact=0.50`, `min_samples_leaf=10`, `max_depth=6` | 42 |
+| TSTR | 0.40 | `conf_fact=0.40`, `min_samples_leaf=11`, `max_depth=7` | 948 |
+
+The deployment script currently locks TSTR to the same tie-resolved settings. For TRTR mode, `scripts/train.py` uses the validation-best settings (`conf_fact=0.25`, `min_samples_leaf=10`, `max_depth=5`, threshold `0.35`).
 
 ---
 
-## Phase 4 — Fold Variance Inspection
+## Cross-Validation Results
+
+| Metric | TRTR mean +/- std | TSTR mean +/- std | Delta |
+|---|---:|---:|---:|
+| Recall | 0.6568 +/- 0.1416 | 0.6663 +/- 0.0985 | +0.0095 |
+| Precision | 0.6238 +/- 0.0516 | 0.5738 +/- 0.0662 | -0.0500 |
+| F1-Score | 0.6325 +/- 0.0822 | 0.6091 +/- 0.0480 | -0.0234 |
+| F2-Score | 0.6452 +/- 0.1162 | 0.6402 +/- 0.0725 | -0.0050 |
+| Accuracy | 0.7160 +/- 0.0388 | 0.6720 +/- 0.0601 | -0.0440 |
+
+TSTR slightly improves mean recall and lowers recall variance, but the CV mean F2 is essentially tied with TRTR and slightly lower by 0.0050.
+
+---
+
+## Fold Variance
 
 | Fold | TRTR Recall | TSTR Recall |
-|---|---|---|
-| 1 | 0.6000 | 0.6500 |
-| 2 | 0.6842 | 0.7368 |
-| 3 | 0.5789 | 0.5263 |
+|---:|---:|---:|
+| 1 | 0.6000 | 0.7000 |
+| 2 | 0.6842 | 0.7895 |
+| 3 | 0.7368 | 0.5263 |
 | 4 | 0.4211 | 0.5789 |
-| 5 | 0.6316 | 0.7368 |
-| **Range** | **0.4211 - 0.6842** | **0.5263 - 0.7368** |
+| 5 | 0.8421 | 0.7368 |
+| Range | 0.4211 - 0.8421 | 0.5263 - 0.7895 |
 
-**Insight:** Without synthetic data, TRTR relies heavily on the luck of the draw; Fold 4 collapses to 42% recall because it happens to underrepresent certain subgroups. TSTR brings the "floor" up to 52%, acting as a powerful regularizer that stabilizes the decision boundaries across different real-world distributions.
-
----
-
-## Phase 5 — Test Set Evaluation (Held-Out)
-
-Evaluated on the 54-row, purely real unseen test set.
-
-| Metric | TRTR | TSTR |
-|---|---|---|
-| **Recall** | 0.5714 | **0.6667** |
-| **Precision** | **0.7059** | 0.6087 |
-| **F1-Score** | 0.6316 | **0.6364** |
-| **F2-Score** | 0.5941 | **0.6542** |
-| **Accuracy** | **0.7407** | 0.7037 |
-
-### CV vs Test Consistency (Drift)
-- **TRTR:** Recall drift -0.0117 \| F2 drift -0.0025
-- **TSTR:** Recall drift +0.0209 \| F2 drift +0.0247
-
-**Insight:** Both models demonstrate phenomenal consistency (< 2.5% drift). The test set perfectly validates the cross-validation hypothesis: the synthetic data genuinely improves real-world recall (+9.5%) and F2-Score (+6.0%) at the cost of minor precision/accuracy trade-offs. 
+TSTR raises the worst-fold recall from 0.4211 to 0.5263 and reduces fold-to-fold spread.
 
 ---
 
-## Phase 6 — Global Feature Importance (TSTR)
+## Held-Out Test Results
+
+| Metric | TRTR | TSTR | Delta |
+|---|---:|---:|---:|
+| Recall | 0.5714 | 0.6667 | +0.0952 |
+| Precision | 0.7059 | 0.6087 | -0.0972 |
+| F1-Score | 0.6316 | 0.6364 | +0.0048 |
+| F2-Score | 0.5941 | 0.6542 | +0.0601 |
+| Accuracy | 0.7407 | 0.7037 | -0.0370 |
+
+### CV-to-Test Drift
+
+| Condition | Recall Drift | F2 Drift |
+|---|---:|---:|
+| TRTR | -0.0854 | -0.0511 |
+| TSTR | +0.0004 | +0.0140 |
+
+On the held-out real test set, TSTR improves recall and F2 while trading off precision and accuracy. This is the expected screening-oriented behavior: the model catches more at-risk students while allowing more false positives.
+
+---
+
+## Global Feature Importance
+
+The final TSTR tree uses only raw task features as split drivers. Incomplete flags were evaluated during research, but their split importance was 0 and they are dropped from deployment CSVs.
 
 | Feature | Importance | Domain |
-|---|---|---|
-| **NC** | 0.4928 | Number Comparison |
-| **NS** | 0.2584 | Number Series |
-| **ADD** | 0.1876 | Single-Digit Addition |
-| **SUB** | 0.0612 | Single-Digit Subtraction |
-| **DM** | ~0.000 | Digit-Dot Matching |
-| **CA** | ~0.000 | Multi-Digit Arithmetic |
+|---|---:|---|
+| NC | 0.4928 | Number Comparison |
+| NS | 0.2584 | Number Series |
+| ADD | 0.1876 | Single-Digit Addition |
+| SUB | 0.0612 | Single-Digit Subtraction |
+| DM | 0.0000 | Digit-Dot Matching |
+| CA | 0.0000 | Multi-Digit Addition and Subtraction |
 
-**Insight:** Four features completely dominate the decision tree. Notably, the tree assigned 0.0 importance to all 6 `_incomplete` missingness flags, meaning they are ignored as split nodes and can be safely dropped during the deployment phase.
+---
+
+## Generated Artifacts
+
+| Artifact | Purpose |
+|---|---|
+| `outputs/grid_search/trtr_grid_search_results.csv` | Full TRTR validation grid search |
+| `outputs/grid_search/tstr_grid_search_results.csv` | Full TSTR validation grid search |
+| `outputs/grid_search/trtr_validation_tie_cv_results.csv` | CV results for tied TRTR validation candidates |
+| `outputs/grid_search/tstr_validation_tie_cv_results.csv` | CV results for tied TSTR validation candidates |
+| `outputs/figures/analysis_report.txt` | Compact summary generated by `scripts/plot_tstr_vs_trtr.py` |
+| `outputs/figures/*.png` | Performance, CV distribution, and hyperparameter trend charts |

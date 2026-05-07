@@ -588,8 +588,12 @@ class C45DecisionTree:
         import pickle
         
         model_package = {
-            'model': self,
-            'optimal_threshold': optimal_threshold,
+            'model':                self,
+            'optimal_threshold':    optimal_threshold,
+            'conf_fact':            self.conf_fact,
+            'min_samples_leaf':     self.min_samples_leaf,
+            'max_depth':            self.max_depth,
+            'epsilon':              self.epsilon,
         }
         
         with open(filepath, 'wb') as file:
@@ -610,11 +614,15 @@ class C45DecisionTree:
             
         loaded_tree = loaded_package['model']
         optimal_threshold = loaded_package['optimal_threshold']
+        conf_fact = loaded_package['conf_fact']
+        min_samples_leaf = loaded_package['min_samples_leaf']
+        max_depth = loaded_package['max_depth']
+        epsilon = loaded_package['epsilon']
         
         logger.info(f"Model successfully loaded from {filepath}")
         logger.info(f"Operating at threshold: {optimal_threshold}")
         
-        return loaded_tree, optimal_threshold
+        return loaded_tree, optimal_threshold, conf_fact, min_samples_leaf, max_depth, epsilon
 
 if __name__ == "__main__":
     decisionTree = C45DecisionTree()

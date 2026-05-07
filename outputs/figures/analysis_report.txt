@@ -1,0 +1,14 @@
+=== TSTR vs TRTR Analysis Report ===
+
+TRTR Best F2: 0.8108 (Recall: 0.8571, Precision: 0.6667)
+TSTR Best F2: 0.8491 (Recall: 0.8571, Precision: 0.8182)
+
+TSTR Improvement in F2 over TRTR: 0.0382
+TSTR Improvement in Recall over TRTR: 0.0000
+TSTR Improvement in Precision over TRTR: 0.1515
+
+=== Tie Candidates CV Performance ===
+TRTR - Tie CV Mean F2: 0.6129 +/- 0.0186
+TSTR - Tie CV Mean F2: 0.6151 +/- 0.0114
+TRTR - Tie CV Mean Recall: 0.6112 +/- 0.0268
+TSTR - Tie CV Mean Recall: 0.6275 +/- 0.0207

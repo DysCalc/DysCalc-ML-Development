@@ -6,9 +6,9 @@ and saves the complete model package to disk.
 
 Usage
 -----
-    python train.py --threshold 0.35                   # required
-    python train.py --threshold 0.35 --out models/v1.pkl
-    python train.py --threshold 0.35 --no-synth        # TRTR mode (real data only)
+    python train.py                                    # TSTR mode
+    python train.py --out models/v1.pkl
+    python train.py --no-synth                         # TRTR mode (real data only)
 
 Output
 ------
@@ -78,10 +78,18 @@ LABEL_COL = "Label"
 # ─────────────────────────────────────────────
 # Hyperparameters  (fixed from evaluation)
 # ─────────────────────────────────────────────
-BEST_PARAMS = {
+TRTR_BEST_PARAMS = {
     "conf_fact":        0.25,
     "min_samples_leaf": 10,
     "max_depth":        5,
+    "threshold":        0.35,
+}
+
+TSTR_BEST_PARAMS = {
+    "conf_fact":        0.4,
+    "min_samples_leaf": 11,
+    "max_depth":        7,
+    "threshold":        0.40,
 }
 
 # ─────────────────────────────────────────────
@@ -185,7 +193,7 @@ def demonstrate_model(model_path: str) -> None:
     log.info("=" * 60)
 
     # 1. Load the model from disk
-    loaded_tree, optimal_threshold = C45DecisionTree.load_model(model_path)
+    loaded_tree, optimal_threshold, conf_fact, min_samples_leaf, max_depth, epsilon = C45DecisionTree.load_model(model_path)
 
     # 2. Load unseen test data
     test_df = load_csv("datasets/processed/test_deployment.csv", "test (unseen)")
@@ -220,7 +228,7 @@ def demonstrate_model(model_path: str) -> None:
 # ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
-def train(out_path: str, use_synth: bool, threshold: float) -> None:
+def train(out_path: str, use_synth: bool) -> None:
     log.info("=" * 60)
     log.info("FunaDB C4.5 Deployment Training")
     log.info("=" * 60)
@@ -234,10 +242,14 @@ def train(out_path: str, use_synth: bool, threshold: float) -> None:
     if use_synth:
         s_train  = load_csv("datasets/processed/s_train_deployment.csv", "synthetic train")
         train_df = pd.concat([r_train, s_train], ignore_index=True)
-        mode     = "Synthetic-Augmented"
+        mode     = "Synthetic-Augmented (TSTR)"
+        params   = TSTR_BEST_PARAMS.copy()
     else:
         train_df = r_train.copy()
-        mode     = "Real-Only"
+        mode     = "Real-Only (TRTR)"
+        params   = TRTR_BEST_PARAMS.copy()
+
+    threshold = params.pop("threshold")
 
     log.info(f"Mode         : {mode}")
     log.info(f"Train shape  : {train_df.shape}")
@@ -250,7 +262,7 @@ def train(out_path: str, use_synth: bool, threshold: float) -> None:
 
     # ── 2. Train tree ─────────────────────────────────────────
     log.info("\n[2/6] Training C4.5 decision tree...")
-    tree = C45DecisionTree(**BEST_PARAMS, feature_domain_mapping=DOMAIN_MAPPING)
+    tree = C45DecisionTree(**params, feature_domain_mapping=DOMAIN_MAPPING)
     tree.fit(X_train, y_train, raw_features=RAW_FEATURES)
 
     log.info(f"Tree depth  : {tree.get_depth()}")
@@ -294,12 +306,6 @@ def train(out_path: str, use_synth: bool, threshold: float) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train and save the FunaDB C4.5 deployment model.")
     parser.add_argument(
-        "--threshold",
-        type=float,
-        required=True,
-        help="Classification threshold for P(at-risk) (e.g. 0.35).",
-    )
-    parser.add_argument(
         "--out",
         default="models/funa_c45.pkl",
         help="Output path for the saved model package (default: models/funa_c45.pkl)",
@@ -311,12 +317,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if not (0.0 < args.threshold < 1.0):
-        log.error("--threshold must be between 0 and 1 (exclusive).")
-        sys.exit(1)
-
     try:
-        train(out_path=args.out, use_synth=not args.no_synth, threshold=args.threshold)
+        train(out_path=args.out, use_synth=not args.no_synth)
         demonstrate_model(model_path=args.out)
     except FileNotFoundError as e:
         log.error(f"Dataset not found: {e}")

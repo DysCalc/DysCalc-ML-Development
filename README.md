@@ -1,389 +1,340 @@
-# Dyscalculia Risk Screening — C4.5 TSTR Pipeline
+# Dyscalculia Risk Screening - C4.5 TSTR Pipeline
 
-A machine learning system for early dyscalculia risk screening using a custom C4.5 decision tree trained with synthetic data augmentation (TSTR). Built on the **FunaDB** dataset, the model classifies students as *At-Risk (1)* or *Typical (0)* based on six numeracy task scores, with per-prediction diagnostic outputs for interpretability.
+A machine learning pipeline for early dyscalculia risk screening using a custom C4.5 decision tree and synthetic minority augmentation. The project uses the FunaDB numeracy dataset to classify students as **At-Risk (`1`)** or **Typical (`0`)** from six numeracy task scores, with per-prediction diagnostics for interpretability.
 
 ---
 
 ## Project Structure
 
+```text
+DysCalc-ML-Development/
+|-- datasets/
+|   |-- raw/
+|   |   `-- FUNADB_rawdata_SUPPL.csv
+|   `-- processed/
+|       |-- FUNADB_labled.csv
+|       |-- cleaned_dataset.csv
+|       |-- train.csv
+|       |-- val.csv
+|       |-- test.csv
+|       |-- s_train.csv
+|       |-- train_deployment.csv
+|       |-- val_deployment.csv
+|       |-- test_deployment.csv
+|       `-- s_train_deployment.csv
+|-- documentation/
+|   |-- dataset_analysis.md
+|   |-- synthetic_data_generation.md
+|   `-- TSTR_results.md
+|-- models/
+|   `-- v1.pkl
+|-- notebooks/
+|   |-- dataset_analysis.ipynb
+|   |-- synthetic_data_generation.ipynb
+|   `-- tstr_vs_trtr.ipynb
+|-- outputs/
+|   |-- figures/
+|   |   |-- analysis_report.txt
+|   |   |-- best_performance_comparison.png
+|   |   |-- cv_f2_distribution.png
+|   |   |-- cv_recall_distribution.png
+|   |   |-- funa_c45_full_tree.svg
+|   |   |-- hyperparameter_trends.png
+|   |   `-- precision_recall_tradeoff.png
+|   |-- grid_search/
+|   |   |-- trtr_grid_search_results.csv
+|   |   |-- tstr_grid_search_results.csv
+|   |   |-- trtr_validation_tie_cv_results.csv
+|   |   `-- tstr_validation_tie_cv_results.csv
+|   `-- logs_and_metrics/
+|       |-- missing_rates.json
+|       `-- train_output.txt
+|-- scripts/
+|   |-- RMAT_Labeling.py
+|   |-- plot_tstr_vs_trtr.py
+|   `-- train.py
+`-- src/
+    |-- __init__.py
+    |-- C45DecisionTree.py
+    `-- Dataclasses.py
 ```
-dyscalc-ml-development/
-│
-├── datasets/
-│   ├── raw/                       
-│   │   └── FUNADB_rawdata_SUPPL.csv      # Raw FunaDB dataset (source)
-│   │
-│   └── processed/                 
-│       ├── FUNADB_labled.csv             # Labeled dataset (output of RMAT_Labeling.py)
-│       ├── cleaned_dataset.csv           # Cleaned dataset after preprocessing
-│       ├── train.csv                     # Real training split (TRTR mode)
-│       ├── val.csv                       # Validation split
-│       ├── test.csv                      # Test split
-│       ├── s_train.csv                   # Synthetic training samples (class 1 only)
-│       ├── train_deployment.csv          # Deployment training split (real, with derived features)
-│       ├── val_deployment.csv            # Deployment validation split
-│       ├── test_deployment.csv           # Deployment test split
-│       └── s_train_deployment.csv        # Deployment synthetic training split
-│
-├── documentation/
-│   ├── dataset_analysis.md               # Summary of EDA and missingness strategies
-│   ├── synthetic_data_generation.md      # Analysis of GAN minority oversampling
-│   └── TSTR_results.md                   # Full TSTR vs TRTR evaluation report
-│
-├── models/
-│   └── v1.pkl                            # Saved deployment models (.pkl)
-│
-├── notebooks/
-│   ├── dataset_analysis.ipynb            # Exploratory data analysis
-│   ├── ML_development.ipynb              # ML Model development and testing
-│   ├── synthetic_data_generation.ipynb   # Synthetic data generation experiments
-│   └── tstr_vs_trtr.ipynb                # Full TSTR vs TRTR evaluation pipeline
-│
-├── outputs/
-│   ├── figures/                          # Auto-generated tree visualizations (SVGs)
-│   └── logs_and_metrics/          
-│       ├── missing_rates.json            # Per-class missing value rates per feature
-│       └── train_output.txt              # Captured logs and sample test diagnostics from train.py
-│   
-├── scripts/
-│   ├── RMAT_Labeling.py                  # Converts raw FunaDB data to labeled dataset
-│   └── train.py                          # Deployment training and model saving script
-│
-└── src/                                  
-    ├── __init__.py                       # Module initialization
-    ├── C45DecisionTree.py                # Custom C4.5 decision tree implementation
-    └── Dataclasses.py                    # Node and DiagnosticOutput dataclasses
-```
-
----
-
-## Background
-
-**Dyscalculia**, a specific learning disorder in mathematics, affects a significant portion of the population worldwide. Early identification is critical but resource-intensive. This project automates screening using a C4.5 decision tree trained on FunaDB — a dataset of numeracy task performance scores — with the goal of flagging at-risk students for further evaluation.
-
-The pipeline uses **TSTR (Train on Synthetic, Test on Real)**: synthetic at-risk samples are generated to augment a small real training set, and the model is validated exclusively on real data.
 
 ---
 
 ## Dataset
 
-### Source: FunaDB
+The raw FunaDB source file is `datasets/raw/FUNADB_rawdata_SUPPL.csv`. Labels are generated by `scripts/RMAT_Labeling.py` from the RMAT composite score:
 
-The **FunaDB** dataset (`datasets/raw/FUNADB_rawdata_SUPPL.csv`) contains raw task scores from numeracy assessments administered to students. After preprocessing, six task score features are retained:
+```text
+Label = 1 if z(RMAT) <= 35th percentile
+Label = 0 otherwise
+```
+
+The RMAT source column is dropped after labeling and is not used as a model feature.
+
+### Raw Task Features
 
 | Feature | Description |
 |---|---|
-| `NC` | Number Comparison — response time (ms) |
-| `DM` | Digit-Dot Matching — response time (ms) |
-| `NS` | Number Series — score |
-| `ADD` | Single-Digit Addition — score |
-| `SUB` | Single-Digit Subtraction — score |
-| `CA` | Multi-Digit Addition and Subtraction — score |
+| `NC` | Number Comparison response time |
+| `DM` | Digit-Dot Matching response time |
+| `NS` | Number Series score |
+| `ADD` | Single-Digit Addition score |
+| `SUB` | Single-Digit Subtraction score |
+| `CA` | Multi-Digit Addition and Subtraction score |
 
-### Labeling (`RMAT_Labeling.py`)
+### Derived Deployment Features
 
-Labels are derived from the **RMAT** (Risk for Mathematics) composite score in the raw data:
+The deployment CSVs include deterministic diagnostic features:
 
-1. RMAT scores are z-score normalized across the population.
-2. Students at or below the **35th percentile** are labeled **At-Risk (1)**; all others are labeled **Typical (0)**.
-3. The `RMAT` column is then dropped — it is not used as a model feature.
-
-```
-Label = 1  if  z(RMAT) ≤ percentile(35)
-Label = 0  otherwise
-```
-
-### Deployment Features
-
-For deployment, six **derived diagnostic features** are computed from the raw scores to enhance interpretability. These are used in `predict_with_diagnostics()` but are never split nodes in the tree:
-
-| Derived Feature | Formula | Domain |
+| Feature | Formula | Domain |
 |---|---|---|
 | `NP` | `NC + DM` | Overall Processing Efficiency |
-| `SN` | `NC − DM` | Symbolic vs. Non-Symbolic Processing Difference |
+| `SN` | `NC - DM` | Symbolic vs. Non-Symbolic Processing Difference |
 | `AF` | `(ADD + SUB + CA) / 3` | Overall Arithmetic Fluency |
-| `BC` | `CA − AF` | Basic vs. Complex Arithmetic Contrast |
-| `AS` | `ADD − SUB` | Addition vs. Subtraction Asymmetry |
+| `BC` | `CA - AF` | Basic vs. Complex Arithmetic Contrast |
+| `AS` | `ADD - SUB` | Addition vs. Subtraction Asymmetry |
 | `PF` | `AF / NP` | Processing-Fluency Integration |
 
-### Splits
+The tree splits only on raw task features during deployment training. Derived features are used for diagnostic severity and task-importance scoring.
 
-All splits use a **70 / 15 / 15** real-data ratio (stratified). The synthetic data augments the training split only.
+### Current Splits
 
-| Split | Rows | Composition |
-|---|---|---|
-| Train (TRTR) | 250 | Real only |
-| Train (TSTR) | 308 | 250 real + 58 synthetic at-risk |
-| Validation | 54 | Real only |
-| Test | 54 | Real only |
+| Split | Rows | Class Distribution | Composition |
+|---|---:|---|---|
+| Train | 250 | 154 typical / 96 at-risk | Real only |
+| Synthetic train | 58 | 58 at-risk | Synthetic only |
+| TSTR train | 308 | 154 typical / 154 at-risk | Real + synthetic |
+| Validation | 54 | 33 typical / 21 at-risk | Real only |
+| Test | 54 | 33 typical / 21 at-risk | Real only |
 
 ---
 
-## Model: `C45DecisionTree`
+## Model
 
-A custom Python implementation of the **C4.5 decision tree** algorithm with error-based pruning and diagnostic output support.
+`src/C45DecisionTree.py` implements a continuous-feature C4.5-style decision tree with:
 
-### Files
+- gain-ratio split selection
+- error-based pruning controlled by `conf_fact`
+- optional threshold candidate capping via `max_thresholds`
+- global split-based feature importance
+- per-sample diagnostic output
+- pickle-based save/load helpers
 
-- `src/C45DecisionTree.py` — Core implementation
-- `src/Dataclasses.py` — `Node` and `DiagnosticOutput` dataclasses
-
-### Constructor Parameters
+Constructor:
 
 ```python
 C45DecisionTree(
-    max_depth           = None,   # Maximum tree depth (None = unlimited)
-    min_samples_split   = 2,      # Minimum samples to attempt a split
-    min_samples_leaf    = 1,      # Minimum samples required at a leaf
-    conf_fact           = 0.25,   # Confidence factor for error-based pruning
-    min_gain_ratio      = 1e-3,   # Minimum gain ratio to accept a split
-    max_thresholds      = None,   # Cap on candidate thresholds per feature (quantile sampled)
-    feature_domain_mapping = {}   # Maps feature names → domain labels for diagnostics
+    max_depth=None,
+    min_samples_split=2,
+    min_samples_leaf=1,
+    conf_fact=0.25,
+    min_gain_ratio=1e-3,
+    max_thresholds=None,
+    feature_domain_mapping=None,
 )
 ```
 
-**Deployment hyperparameters (fixed from evaluation):**
+`fit(X, y, raw_features)` trains the tree using `raw_features` for splits while retaining the full `X` feature set for diagnostic statistics.
+
+### Diagnostic Output
+
+`predict_with_diagnostics(X)` returns one `DiagnosticOutput` per row:
 
 ```python
-BEST_PARAMS = {
-    "conf_fact":        0.25,
-    "min_samples_leaf": 10,
-    "max_depth":        5,
-}
+DiagnosticOutput(
+    predicted_class: str,
+    confidence: float,
+    decision_path: list[tuple[str, float, str]],
+    decision_path_readable: str,
+    domain_severity_scores: dict[str, float],
+    task_importance_scores: dict[str, float],
+    leaf_distribution: dict,
+)
 ```
 
-### How It Works
-
-**Splitting criterion:** Gain Ratio (C4.5 standard), with a minimum threshold to prevent trivial splits.
-
-```
-GainRatio(X, F) = Gain(X, F) / SplitInfo(X, F)
-```
-
-**Error-based pruning:** After the tree is built, subtrees are pruned bottom-up using a pessimistic upper-confidence-bound error estimate (controlled by `conf_fact`). A subtree is collapsed to a leaf when the estimated leaf error ≤ estimated subtree error.
-
-**Feature importance:** Global importance is computed as the gain-ratio-weighted fraction of training samples at each split node, normalized to sum to 1.
-
-```
-Importance(F_j) = Σ GainRatio(node_n, F_j) * (|D_n| / |D|)
-```
-
-### Key Methods
-
-| Method | Description |
-|---|---|
-| `fit(X, y, raw_features)` | Train the tree. `X` contains all features; only `raw_features` are used for splits. Full `X` is used to compute feature statistics for diagnostics. |
-| `predict(X)` | Return predicted class labels as a NumPy array. |
-| `predict_with_diagnostics(X)` | Return a list of `DiagnosticOutput` objects — one per sample — with confidence, decision path, domain severity scores, and task importance scores. |
-| `get_feature_importance()` | Return the global feature importance dictionary. |
-| `get_depth()` | Return the depth of the fitted tree. |
-| `get_leaves_num()` | Return the number of leaf nodes. |
-| `save_model(filepath, optimal_threshold)` | Serialize the model package (tree + threshold) to a `.pkl` file via `pickle`. |
-| `C45DecisionTree.load_model(filepath)` | Class method. Load and return `(tree, optimal_threshold)` from a `.pkl` file. |
-
-### DiagnosticOutput
-
-Each call to `predict_with_diagnostics()` returns a `DiagnosticOutput` per sample:
-
-```python
-@dataclass
-class DiagnosticOutput:
-    predicted_class:        str              # "0" or "1"
-    confidence:             float            # P(predicted class | leaf), Laplace-smoothed
-    decision_path:          List[Tuple]      # [(feature, threshold, direction), ...]
-    decision_path_readable: str              # Human-readable path string
-    domain_severity_scores: Dict[str, float] # Normalized per-domain severity
-    task_importance_scores: Dict[str, float] # Normalized per-task importance
-    leaf_distribution:      Dict[Any, int]   # Raw class counts at leaf
-```
-
-**Domain severity** is computed along the prediction path using information gain as the weight and the sample's z-score as the magnitude indicator. Derived features (NP, SN, AF, BC, AS, PF) contribute via z-score alone (no gain ratio available since they are never split nodes).
-
-**Task importance** uses gain ratio as the weight along the decision path.
-
-Both scores are normalized to sum to 1 per prediction.
+Confidence is computed from leaf class counts with Laplace smoothing. Path features contribute to task importance and domain severity using gain ratio / information gain and z-score magnitude. Derived features do not appear as split nodes, so they contribute diagnostic signal through z-score magnitude.
 
 ---
 
-## Training Pipeline
+## Evaluation Summary
 
-### Evaluation: `notebooks/tstr_vs_trtr.ipynb`
+Full details are in `documentation/TSTR_results.md`.
 
-Runs the full 6-phase evaluation comparing TSTR and TRTR. This notebook is used for research and model selection — not deployment.
+### Selected Evaluation Settings
 
-**Phases:**
-1. **Threshold sweep** — selects classification threshold via F2-score maximization on the validation set using raw tree probabilities.
-2. **Cross-validation** — 5-fold stratified CV on real data; synthetic rows pinned to every training fold (never validation folds).
-3. **CV summary comparison** — side-by-side TRTR vs TSTR metric table.
-4. **Fold variance inspection** — per-fold breakdown with correlation analysis.
-5. **Test set evaluation** — final held-out test metrics with CV-to-test drift analysis.
-6. **Global feature importance** — tree split importance for the TSTR model.
+| Condition | Threshold | Params |
+|---|---:|---|
+| TRTR evaluation | 0.35 | `conf_fact=0.50`, `min_samples_leaf=10`, `max_depth=6` |
+| TSTR evaluation | 0.40 | `conf_fact=0.40`, `min_samples_leaf=11`, `max_depth=7` |
 
-### Deployment: `train.py`
+The deployment script currently uses the same TSTR settings. Its TRTR mode uses `conf_fact=0.25`, `min_samples_leaf=10`, `max_depth=5`, threshold `0.35`.
 
-Trains the final model for deployment. Supports both TSTR (default) and TRTR (`--no-synth`) modes.
+### Cross-Validation
 
-**Usage:**
+| Metric | TRTR | TSTR | Delta |
+|---|---:|---:|---:|
+| Recall | 0.6568 +/- 0.1416 | 0.6663 +/- 0.0985 | +0.0095 |
+| Precision | 0.6238 +/- 0.0516 | 0.5738 +/- 0.0662 | -0.0500 |
+| F1 | 0.6325 +/- 0.0822 | 0.6091 +/- 0.0480 | -0.0234 |
+| F2 | 0.6452 +/- 0.1162 | 0.6402 +/- 0.0725 | -0.0050 |
+| Accuracy | 0.7160 +/- 0.0388 | 0.6720 +/- 0.0601 | -0.0440 |
+
+### Held-Out Test
+
+| Metric | TRTR | TSTR | Delta |
+|---|---:|---:|---:|
+| Recall | 0.5714 | 0.6667 | +0.0952 |
+| Precision | 0.7059 | 0.6087 | -0.0972 |
+| F1 | 0.6316 | 0.6364 | +0.0048 |
+| F2 | 0.5941 | 0.6542 | +0.0601 |
+| Accuracy | 0.7407 | 0.7037 | -0.0370 |
+
+TSTR improves held-out recall and F2, with the expected screening trade-off of lower precision and accuracy.
+
+### TSTR Feature Importance
+
+| Feature | Importance |
+|---|---:|
+| `NC` | 0.4928 |
+| `NS` | 0.2584 |
+| `ADD` | 0.1876 |
+| `SUB` | 0.0612 |
+| `DM` | 0.0000 |
+| `CA` | 0.0000 |
+
+Incomplete flags were tested in the research notebook, had 0 split importance, and are dropped from the deployment CSVs.
+
+---
+
+## Training
+
+`scripts/train.py` trains and saves the deployment model. TSTR is the default mode.
 
 ```bash
-# TSTR mode (real + synthetic training data)
-python train.py --threshold 0.35
+# TSTR mode: real + synthetic training data
+python scripts/train.py
 
-# TRTR mode (real data only)
-python train.py --threshold 0.35 --no-synth
+# Real-only TRTR mode
+python scripts/train.py --no-synth
 
 # Custom output path
-python train.py --threshold 0.35 --out models/funa_c45_v1.pkl
+python scripts/train.py --out models/v1.pkl
 ```
 
-**Training steps:**
-1. Loads real training data and (optionally) synthetic data.
-2. Trains a C4.5 tree with fixed deployment hyperparameters.
-3. Evaluates on the validation set at the provided threshold (informational only).
-4. Evaluates on the held-out test set at the provided threshold.
-5. Saves the model package (tree + threshold) to disk.
-6. Automatically exports a scalable SVG visualization of the decision tree using Graphviz to `outputs/figures/`.
-7. Runs a demonstration on `test_deployment.csv`, printing metrics and 10 sample diagnostics.
+Current locked parameters in `scripts/train.py`:
 
-**Output `.pkl` structure:**
 ```python
-{
-    'model':             C45DecisionTree,   # fitted tree
-    'optimal_threshold': float,             # locked classification threshold
+TRTR_BEST_PARAMS = {
+    "conf_fact": 0.25,
+    "min_samples_leaf": 10,
+    "max_depth": 5,
+    "threshold": 0.35,
+}
+
+TSTR_BEST_PARAMS = {
+    "conf_fact": 0.4,
+    "min_samples_leaf": 11,
+    "max_depth": 7,
+    "threshold": 0.40,
 }
 ```
 
-**Domain mapping used in deployment:**
+The script:
 
-| Feature | Domain Label |
-|---|---|
-| NC | Number Comparison |
-| DM | Digit-Dot Matching |
-| NP | Overall Processing Efficiency |
-| SN | Symbolic vs. Non-Symbolic Processing Difference |
-| NS | Number Series |
-| ADD | Single-Digit Addition |
-| SUB | Single-Digit Subtraction |
-| CA | Multi-Digit Addition and Subtraction |
-| AF | Overall Arithmetic Fluency |
-| BC | Basic vs. Complex Arithmetic Contrast |
-| AS | Addition vs. Subtraction Asymmetry |
-| PF | Processing-Fluency Integration |
+1. Loads deployment train/validation/test CSVs.
+2. Appends `s_train_deployment.csv` in TSTR mode.
+3. Trains a C4.5 tree on raw features.
+4. Evaluates validation and test data at the locked threshold.
+5. Saves a pickle model package.
+6. Exports a Graphviz SVG tree to `outputs/figures/{model_stem}_full_tree.svg`.
+7. Reloads the saved model and prints sample diagnostics for `test_deployment.csv`.
 
----
+Saved model packages include:
 
-## Evaluation Results Summary
-
-Full results and interpretation are in `documentation/TSTR_results.md`. Key findings:
-
-### Cross-Validation (5-Fold)
-
-| Metric | TRTR | TSTR | Δ |
-|---|---|---|---|
-| Recall | 0.5832 ± 0.0885 | 0.6458 ± 0.0841 | **+0.0626** |
-| Precision | 0.6671 ± 0.0614 | 0.6061 ± 0.1188 | -0.0610 |
-| F1 | 0.6194 ± 0.0677 | 0.6127 ± 0.0416 | -0.0068 |
-| F2 | 0.5965 ± 0.0793 | 0.6295 ± 0.0574 | **+0.0330** |
-
-### Test Set (n=54, threshold=0.35)
-
-| Metric | TRTR | TSTR |
-|---|---|---|
-| Recall | 0.5714 | **0.6667** |
-| Precision | **0.7059** | 0.6087 |
-| F1 | 0.6316 | **0.6364** |
-| Accuracy | **0.7407** | 0.7037 |
-
-At n=54, one misclassified sample = 0.048 metric swing. Removing the flawed probability calibrator resolved the massive CV-to-test drift seen previously. Both models now show highly consistent performance between CV and Test (drift < 2.5%). **TSTR** is the clear winner for deployment, as the synthetic data successfully boosted the true Recall (+9.5%) and F2-Score (+6.0%) on the held-out test set compared to the Real-Only model.
-
-### Feature Importance (TSTR Tree)
-
-| Feature | Importance | Domain |
-|---|---|---|
-| NC | 0.4928 | Number Comparison |
-| NS | 0.2584 | Number Series |
-| ADD | 0.1876 | Single-Digit Addition |
-| SUB | 0.0612 | Single-Digit Subtraction |
-| DM | ~0.000 | Digit-Dot Matching |
-| CA | ~0.000 | Multi-Digit Arithmetic |
-
-Four features — **NC, NS, ADD, and SUB** — account for 100% of split importance. The tree ignored all incomplete/timeout flags as split nodes.
-
----
-
-## Dependencies
-
-You can install all required packages via requirements.txt. Note that exporting tree visualizations requires the `graphviz` system binary in addition to the Python package:
-
+```python
+{
+    "model": C45DecisionTree,
+    "optimal_threshold": float,
+    "conf_fact": float,
+    "min_samples_leaf": int,
+    "max_depth": int | None,
+    "epsilon": float,
+}
 ```
-pip install -r requirements.txt
-# Ensure graphviz is installed on your OS, e.g., sudo apt-get install graphviz
+
+`C45DecisionTree.load_model(path)` currently returns:
+
+```python
+tree, optimal_threshold, conf_fact, min_samples_leaf, max_depth, epsilon
 ```
 
 ---
 
 ## Quick Start
 
-### 1. Label the raw dataset
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Graphviz SVG export also requires the Graphviz system binary.
+
+Generate labels:
 
 ```bash
 python scripts/RMAT_Labeling.py
 ```
 
-Reads `datasets/raw/FUNADB_rawdata_SUPPL.csv`, produces `datasets/processed/FUNADB_labled.csv`.
+Prepare data and synthetic samples:
 
----
+1. Run `notebooks/dataset_analysis.ipynb`.
+2. Run `notebooks/synthetic_data_generation.ipynb`.
+3. Run `notebooks/tstr_vs_trtr.ipynb` for evaluation and grid-search artifacts.
 
-### 2. Clean, Augment, and Prototype (Notebooks)
-
-Before running the ML scripts, you must generate the split datasets and synthetic samples using the Jupyter notebooks.
-
-- `notebooks/dataset_analysis.ipynb`: Run this to perform Exploratory Data Analysis (EDA) and handle sentinel/missing values. Produces `dataset/processed/cleaned_dataset.csv`.
-
-- `notebooks/synthetic_data_generation.ipynb`: Run this to train the GAN on the minority class and generate the stratified splits. Produces `train.csv`, `val.csv`, `test.csv`, `s_train.csv`, and their deployment counterparts.
-
-- `notebooks/ML_development.ipynb`: (Optional) Use this sandbox to interactively prototype the C4.5 model, test hyperparameters, and visually inspect tree behavior before running the rigid evaluation scripts.
-
----
-
-### 3. Run TSTR vs TRTR evaluation
-
-Open and execute `notebooks/tstr_vs_trtr.ipynb` in your IDE or Jupyter environment. This runs the full 6-phase evaluation in parallel. Expects the split CSVs to be present in `datasets/processed/`.
-
-### 4. Train the deployment model
+Train the deployment model:
 
 ```bash
-python scripts/train.py --threshold 0.35
+python scripts/train.py --out models/v1.pkl
 ```
 
-Trains the final C4.5 tree on the full dataset and saves the artifact to `models/funa_c45.pkl` by default.
+Generate comparison figures from the grid-search outputs:
 
-### 5. Load and use the model
+```bash
+python scripts/plot_tstr_vs_trtr.py
+```
+
+Load and use a saved model:
 
 ```python
-from src.C45DecisionTree import C45DecisionTree
 import pandas as pd
+from src.C45DecisionTree import C45DecisionTree
 
-# Load the model package
-tree, threshold = C45DecisionTree.load_model("models/v1.pkl")
+tree, threshold, conf_fact, min_samples_leaf, max_depth, epsilon = (
+    C45DecisionTree.load_model("models/v1.pkl")
+)
 
-# Load deployment data
 df = pd.read_csv("datasets/processed/test_deployment.csv")
 X = df[["NC", "DM", "NS", "ADD", "SUB", "CA", "NP", "SN", "AF", "BC", "AS", "PF"]]
 
-# Run prediction with diagnostic breakdown
 diagnostics = tree.predict_with_diagnostics(X)
-# In production, use the tree's raw confidence for probabilities
-probs = [d.confidence if int(d.predicted_class) == 1 else 1 - d.confidence for d in diagnostics]
-
+probs = [
+    d.confidence if int(d.predicted_class) == 1 else 1 - d.confidence
+    for d in diagnostics
+]
 predictions = [1 if p >= threshold else 0 for p in probs]
 
-# Inspect a specific diagnostic output
-d = diagnostics[0]
-print("Path taken:", d.decision_path_readable)
-print("Domain Severities:", d.domain_severity_scores)
-print("Task Importances:", d.task_importance_scores)
+first = diagnostics[0]
+print(first.decision_path_readable)
+print(first.domain_severity_scores)
+print(first.task_importance_scores)
 ```
 
 ---
 
+## Notes
+
+- Research CSVs can include incomplete flags and `is_synthetic`; deployment CSVs contain only raw features, label, and derived diagnostic features.
+- TSTR synthetic rows are class-1 only and are never used in validation or test splits.
+- `outputs/logs_and_metrics/train_output.txt` is a captured run log and may not match the latest default `train.py` arguments if the script has been run with custom flags.

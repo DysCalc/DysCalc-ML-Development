@@ -1,29 +1,65 @@
-# Exploratory Data Analysis & Preprocessing
+# Exploratory Data Analysis and Preprocessing
 
-**Notebook:** `notebooks/dataset_analysis.ipynb`
+**Notebook:** `notebooks/dataset_analysis.ipynb`  
+**Primary output:** `datasets/processed/cleaned_dataset.csv`  
+**Missing-rate output:** `outputs/logs_and_metrics/missing_rates.json`
 
 ## Overview
-This notebook establishes the foundational preprocessing pipeline for the FunaDB dataset. Since this is a clinical/educational dataset measuring task scores and response times, careful consideration is given to missing values, sentinels, and class-specific distributions before the data is passed to the ML models.
+
+The dataset-analysis notebook prepares the labeled FunaDB dataset for synthetic generation and C4.5 evaluation. It cleans invalid values, preserves informative missingness through flags, imputes task scores, clips outliers by class, and exports a cleaned research dataset.
+
+The current cleaned dataset has 358 rows:
+
+| Class | Rows |
+|---|---:|
+| Typical (`0`) | 220 |
+| At-risk (`1`) | 138 |
+
+## Cleaned Dataset Columns
+
+`cleaned_dataset.csv` currently contains the six raw task features, the target label, and six incomplete flags:
+
+```text
+NC, DM, NS, ADD, SUB, CA, Label,
+NC_incomplete, DM_incomplete, NS_incomplete,
+ADD_incomplete, SUB_incomplete, CA_incomplete
+```
+
+Derived diagnostic features are added later by `notebooks/synthetic_data_generation.ipynb`.
 
 ## Key Steps
 
-### 1. Data Cleaning & Univariate Analysis
-- **Sentinel Values:** Replaces known invalid sentinels with NaNs.
-- **Numeric Safety:** Enforces strict numeric safety; task scores cannot be negative.
-- **Distributions:** Maps out histograms and kernel density estimates to understand the skewness and kurtosis of each raw feature (NC, DM, NS, ADD, SUB, CA).
+### 1. Cleaning and Type Safety
 
-### 2. Missingness Analysis & Imputation
-- **Informative Missingness:** Missing scores in educational datasets are rarely random. An absent student or a timed-out task is a diagnostic signal. The notebook analyzes whether missingness is disproportionately concentrated in the At-Risk class.
-- **Indicator Flags:** To preserve the diagnostic signal of absence, binary flags (`{feature}_incomplete`) are generated before any imputation occurs.
-- **Per-Class Median Imputation:** NaNs are imputed dynamically using the median *of the respective class*. This group-aware imputation prevents bleeding signals across the At-Risk and Typical boundaries.
+The notebook replaces known invalid sentinel values with missing values, coerces task columns to numeric values, and prevents impossible negative task scores from entering downstream modeling.
 
-### 3. Outlier Handling (Per-Class IQR Clipping)
-- Outliers are clipped using the Interquartile Range (IQR) method. 
-- Crucially, this clipping is done **within each class separately**. Global clipping would corrupt the genuinely different, extreme score ranges exhibited by At-Risk students.
+### 2. Missingness Analysis
 
-### 4. Correlation & Multivariate Interactions
-- **Correlation Matrix:** Quantifies collinearity among features, specifically highlighting the division between Number Processing constructs (NC, DM) and Arithmetic Fluency constructs (NS, ADD, SUB, CA).
-- **Pairplots:** Visualizes bivariate relationships with class-specific color mappings to identify clear decision boundaries prior to normalization.
+Missing task values are treated as potentially informative. Before imputation, the notebook creates one binary incomplete flag per raw feature:
 
-## Output
-Produces the `datasets/processed/cleaned_dataset.csv` artifact, ready for synthetic data generation and modeling.
+| Raw Feature | Flag |
+|---|---|
+| `NC` | `NC_incomplete` |
+| `DM` | `DM_incomplete` |
+| `NS` | `NS_incomplete` |
+| `ADD` | `ADD_incomplete` |
+| `SUB` | `SUB_incomplete` |
+| `CA` | `CA_incomplete` |
+
+The empirical missing rates are exported to `outputs/logs_and_metrics/missing_rates.json` and reused by the synthetic generation notebook.
+
+### 3. Per-Class Median Imputation
+
+Missing values are imputed using the median for the corresponding class. This keeps imputation from blending typical and at-risk distributions.
+
+### 4. Per-Class IQR Clipping
+
+Outliers are clipped using class-specific IQR bounds. This preserves genuine differences between typical and at-risk score ranges while limiting extreme values that could dominate GAN training or tree splits.
+
+### 5. Distribution and Correlation Checks
+
+The notebook visualizes univariate distributions, class-separated patterns, and multivariate relationships across the six raw task features. These checks inform the later synthetic-data validation strategy.
+
+## Downstream Use
+
+`cleaned_dataset.csv` is the input to `notebooks/synthetic_data_generation.ipynb`, which creates the train/validation/test split, synthetic at-risk rows, derived diagnostic features, and deployment-ready CSVs.
