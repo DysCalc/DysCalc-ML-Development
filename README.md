@@ -38,7 +38,7 @@ DysCalc-ML-Development/
 |   |   |-- best_performance_comparison.png
 |   |   |-- cv_f2_distribution.png
 |   |   |-- cv_recall_distribution.png
-|   |   |-- funa_c45_full_tree.svg
+|   |   |-- {model_stem}_full_tree.svg
 |   |   |-- hyperparameter_trends.png
 |   |   `-- precision_recall_tradeoff.png
 |   |-- grid_search/
@@ -209,7 +209,7 @@ Incomplete flags were tested in the research notebook, had 0 split importance, a
 
 ## Training
 
-`scripts/train.py` trains and saves the deployment model. TSTR is the default mode.
+`scripts/train.py` trains and saves the deployment model. TSTR is the default mode. Important: Run this script from the project root directory so relative file paths resolve correctly.
 
 ```bash
 # TSTR mode: real + synthetic training data
@@ -273,39 +273,44 @@ tree, optimal_threshold, conf_fact, min_samples_leaf, max_depth, epsilon
 
 ## Quick Start
 
-Install dependencies:
+### 1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Graphviz SVG export also requires the Graphviz system binary.
+*Note: Graphviz SVG export also requires the Graphviz system binary to be installed on your OS.*
 
-Generate labels:
+### 2. Generate labels:
+**Important:** Run all Python scripts from the **project root** directory so relative string paths resolve correctly.
 
 ```bash
 python scripts/RMAT_Labeling.py
 ```
 
-Prepare data and synthetic samples:
+### 3. Prepare data and synthetic samples:
 
-1. Run `notebooks/dataset_analysis.ipynb`.
-2. Run `notebooks/synthetic_data_generation.ipynb`.
-3. Run `notebooks/tstr_vs_trtr.ipynb` for evaluation and grid-search artifacts.
+**Critical Notebook Execution Order & Working Directory:**
+* The notebooks have strict file dependencies and must be run in the exact order below.
+* You must run tstr_vs_trtr.ipynb from inside the notebooks/ directory (ensure your Jupyter kernel working directory is notebooks/) for pathing and src imports to work properly.
 
-Train the deployment model:
+1. Run `notebooks/dataset_analysis.ipynb` *(Exports `datasets/processed/cleaned_dataset.csv` and `outputs/logs_and_metrics/missing_rates.json`).*
+2. Run `notebooks/synthetic_data_generation.ipynb` *(Reads `missing_rates.json` and creates `train.csv`, `s_train.csv`, `val.csv`, and `test.csv`).*
+3. Run `notebooks/tstr_vs_trtr.ipynb` *(Requires the CSVs from step 2; generates grid-search artifacts and evaluation metrics).*
 
+### 4. Train the deployment model:
+Run this from the **project root**: 
 ```bash
 python scripts/train.py --out models/v1.pkl
 ```
 
-Generate comparison figures from the grid-search outputs:
-
+### 5. Generate comparison figures from the grid-search outputs:
+Run this from the **project root**:
 ```bash
 python scripts/plot_tstr_vs_trtr.py
 ```
 
-Load and use a saved model:
+### 6. Load and use a saved model:
 
 ```python
 import pandas as pd
