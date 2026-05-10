@@ -31,7 +31,8 @@ DysCalc-ML-Development/
 |-- notebooks/
 |   |-- dataset_analysis.ipynb
 |   |-- synthetic_data_generation.ipynb
-|   `-- tstr_vs_trtr.ipynb
+|   |-- tstr_vs_trtr.ipynb
+|   `-- tstr_vs_trtr_no_thresholding.ipynb
 |-- outputs/
 |   |-- figures/
 |   |   |-- analysis_report.txt
@@ -45,7 +46,11 @@ DysCalc-ML-Development/
 |   |   |-- trtr_grid_search_results.csv
 |   |   |-- tstr_grid_search_results.csv
 |   |   |-- trtr_validation_tie_cv_results.csv
-|   |   `-- tstr_validation_tie_cv_results.csv
+|   |   |-- tstr_validation_tie_cv_results.csv
+|   |   |-- trtr_no_threshold_grid_search_results.csv
+|   |   |-- tstr_no_threshold_grid_search_results.csv
+|   |   |-- trtr_validation_tie_no_threshold_cv_results.csv
+|   |   `-- tstr_validation_tie_no_threshold_cv_results.csv
 |   `-- logs_and_metrics/
 |       |-- missing_rates.json
 |       `-- train_output.txt
@@ -161,16 +166,23 @@ Confidence is computed from leaf class counts with Laplace smoothing. Path featu
 
 Full details are in `documentation/TSTR_results.md`.
 
+Two evaluation variants are now documented:
+
+- **Thresholded:** converts tree confidence to `P(At-Risk)` and applies a validation-selected cutoff.
+- **Non-thresholded:** uses the native C4.5 class prediction directly, with no post-training cutoff search.
+
+The non-thresholded experiment was added to verify that the synthetic-augmentation effect does not depend only on threshold tuning. The deployment script currently remains thresholded and uses the locked TSTR settings shown below.
+
 ### Selected Evaluation Settings
 
-| Condition | Threshold | Params |
-|---|---:|---|
-| TRTR evaluation | 0.35 | `conf_fact=0.50`, `min_samples_leaf=10`, `max_depth=6` |
-| TSTR evaluation | 0.40 | `conf_fact=0.40`, `min_samples_leaf=11`, `max_depth=7` |
+| Variant | Condition | Threshold | Params |
+|---|---|---:|---|
+| Thresholded | TRTR evaluation | 0.35 | `conf_fact=0.50`, `min_samples_leaf=10`, `max_depth=6` |
+| Thresholded | TSTR evaluation | 0.40 | `conf_fact=0.40`, `min_samples_leaf=11`, `max_depth=7` |
+| Non-thresholded | TRTR evaluation | N/A | `conf_fact=0.50`, `min_samples_leaf=10`, `max_depth=6` |
+| Non-thresholded | TSTR evaluation | N/A | `conf_fact=0.25`, `min_samples_leaf=11`, `max_depth=7` |
 
-The deployment script currently uses the same TSTR settings. Its TRTR mode uses `conf_fact=0.25`, `min_samples_leaf=10`, `max_depth=5`, threshold `0.35`.
-
-### Cross-Validation
+### Thresholded Cross-Validation
 
 | Metric | TRTR | TSTR | Delta |
 |---|---:|---:|---:|
@@ -180,7 +192,7 @@ The deployment script currently uses the same TSTR settings. Its TRTR mode uses 
 | F2 | 0.6452 +/- 0.1162 | 0.6402 +/- 0.0725 | -0.0050 |
 | Accuracy | 0.7160 +/- 0.0388 | 0.6720 +/- 0.0601 | -0.0440 |
 
-### Held-Out Test
+### Thresholded Held-Out Test
 
 | Metric | TRTR | TSTR | Delta |
 |---|---:|---:|---:|
@@ -190,7 +202,27 @@ The deployment script currently uses the same TSTR settings. Its TRTR mode uses 
 | F2 | 0.5941 | 0.6542 | +0.0601 |
 | Accuracy | 0.7407 | 0.7037 | -0.0370 |
 
-TSTR improves held-out recall and F2, with the expected screening trade-off of lower precision and accuracy.
+### Non-Thresholded Cross-Validation
+
+| Metric | TRTR | TSTR | Delta |
+|---|---:|---:|---:|
+| Recall | 0.5942 +/- 0.1410 | 0.6458 +/- 0.1123 | +0.0516 |
+| Precision | 0.6311 +/- 0.0370 | 0.5797 +/- 0.0431 | -0.0514 |
+| F1 | 0.6052 +/- 0.0791 | 0.6041 +/- 0.0521 | -0.0011 |
+| F2 | 0.5969 +/- 0.1149 | 0.6269 +/- 0.0863 | +0.0300 |
+| Accuracy | 0.7120 +/- 0.0325 | 0.6800 +/- 0.0358 | -0.0320 |
+
+### Non-Thresholded Held-Out Test
+
+| Metric | TRTR | TSTR | Delta |
+|---|---:|---:|---:|
+| Recall | 0.5238 | 0.6667 | +0.1429 |
+| Precision | 0.6875 | 0.6087 | -0.0788 |
+| F1 | 0.5946 | 0.6364 | +0.0418 |
+| F2 | 0.5500 | 0.6542 | +0.1042 |
+| Accuracy | 0.7222 | 0.7037 | -0.0185 |
+
+Across both variants, TSTR improves held-out recall and F2, with the expected screening trade-off of lower precision and accuracy. In this run, the thresholded and non-thresholded TSTR models produce identical held-out test metrics, so the TSTR improvement is not dependent on threshold optimization alone.
 
 ### TSTR Feature Importance
 
@@ -239,6 +271,8 @@ TSTR_BEST_PARAMS = {
     "threshold": 0.40,
 }
 ```
+
+These deployment settings correspond to the thresholded experiment. The non-thresholded notebook is included as a research check showing that the synthetic-augmented held-out result persists when native tree predictions are used directly.
 
 The script:
 
@@ -292,11 +326,12 @@ python scripts/RMAT_Labeling.py
 
 **Critical Notebook Execution Order & Working Directory:**
 * The notebooks have strict file dependencies and must be run in the exact order below.
-* You must run tstr_vs_trtr.ipynb from inside the notebooks/ directory (ensure your Jupyter kernel working directory is notebooks/) for pathing and src imports to work properly.
+* You must run the evaluation notebooks from inside the notebooks/ directory (ensure your Jupyter kernel working directory is notebooks/) for pathing and src imports to work properly.
 
 1. Run `notebooks/dataset_analysis.ipynb` *(Exports `datasets/processed/cleaned_dataset.csv` and `outputs/logs_and_metrics/missing_rates.json`).*
 2. Run `notebooks/synthetic_data_generation.ipynb` *(Reads `missing_rates.json` and creates `train.csv`, `s_train.csv`, `val.csv`, and `test.csv`).*
-3. Run `notebooks/tstr_vs_trtr.ipynb` *(Requires the CSVs from step 2; generates grid-search artifacts and evaluation metrics).*
+3. Run `notebooks/tstr_vs_trtr.ipynb` *(Thresholded evaluation; generates grid-search artifacts and evaluation metrics).*
+4. Run `notebooks/tstr_vs_trtr_no_thresholding.ipynb` *(Non-thresholded evaluation; verifies the TSTR effect with native tree predictions).*
 
 ### 4. Train the deployment model:
 Run this from the **project root**: 
@@ -304,7 +339,7 @@ Run this from the **project root**:
 python scripts/train.py --out models/v1.pkl
 ```
 
-### 5. Generate comparison figures from the grid-search outputs:
+### 5. Generate thresholded comparison figures from the grid-search outputs:
 Run this from the **project root**:
 ```bash
 python scripts/plot_tstr_vs_trtr.py
