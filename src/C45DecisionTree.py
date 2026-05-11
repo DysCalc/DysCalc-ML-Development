@@ -415,6 +415,36 @@ class C45DecisionTree:
             predictions.append(pred)
         
         return np.array(predictions)
+
+    def predict_proba(self, X: pd.DataFrame, positive_class=1) -> np.ndarray:
+        """
+        Predict the probability of the positive class from each reached leaf.
+
+        The probability uses the class distribution stored at the leaf and the
+        same Laplace smoothing convention used by predict_with_diagnostics().
+        """
+        if self.tree is None:
+            raise ValueError("Tree not fitted. Call fit() first.")
+
+        X = X[self.raw_features]
+        probabilities = []
+
+        for _, row in X.iterrows():
+            _, path = self._predict_single(row, self.tree)
+            leaf_node = path[-1]
+            leaf_dist = dict(leaf_node.distribution)
+            total = sum(leaf_dist.values())
+
+            positive_keys = {positive_class, str(positive_class)}
+            pos_count = sum(
+                count for label, count in leaf_dist.items()
+                if label in positive_keys or str(label) in positive_keys
+            )
+
+            proba = (pos_count + 1) / (total + self._n_classes)
+            probabilities.append(proba)
+
+        return np.array(probabilities)
     
     def predict_with_diagnostics(self, X: pd.DataFrame) -> List[DiagnosticOutput]:
         """

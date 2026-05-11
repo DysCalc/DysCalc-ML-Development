@@ -21,11 +21,12 @@ Two prediction strategies were evaluated:
 
 | Aspect | Experiment 1: With Thresholding | Experiment 2: Without Thresholding |
 |---|---|---|
-| Notebook | `tstr_vs_trtr(6).ipynb` | `tstr_vs_trtr_no_thresholding.ipynb` |
-| Prediction rule | Tree confidence/probability is converted to `P(At-Risk)`, then thresholded | Native tree class prediction is used directly |
+| Notebook | `tstr_vs_trtr.ipynb` | `tstr_vs_trtr_no_thresholding.ipynb` |
+| Prediction rule | `predict_proba()` returns P(At-Risk) from the leaf distribution, then thresholded | Native tree class prediction via `predict()` is used directly; `predict_proba()` provides probabilities for AUC/RMSE scoring only |
 | Threshold behavior | Threshold is selected on validation data | No explicit threshold search; equivalent to native majority-leaf behavior |
 | Search space | 4,059 C4.5 parameter combinations × 9 thresholds = 36,531 evaluations | 4,059 C4.5 parameter combinations |
 | Threshold range | 0.35 to 0.75 in increments of 0.05 | Not applicable |
+| Probability source | `C45DecisionTree.predict_proba(X, positive_class=1)` — Laplace-smoothed leaf probability | Same method used for AUC-ROC and RMSE computation |
 
 The two experiments answer different questions:
 
@@ -57,6 +58,8 @@ Both experiments use the same C4.5 hyperparameter grid:
 | `min_samples_leaf` | 10 to 50 |
 | `max_depth` | 5 to 15 |
 | `threshold` | 0.35 to 0.75 in increments of 0.05; thresholded experiment only |
+
+In addition to F2-score (the primary selection target), the grid search now records **AUC-ROC** and **RMSE** for each configuration using probabilities from `predict_proba()`. These are retained as secondary diagnostic metrics and are not used for hyperparameter selection.
 
 The primary optimization target is **F2-score**, because the screening task prioritizes recall more strongly than precision. Recall, precision, F1-score, and accuracy are retained as secondary metrics to expose the trade-off between missed At-Risk cases and false positives.
 
@@ -93,6 +96,8 @@ The selected synthetic-augmented threshold is **0.40**. This means the final cla
 | F1-score | 0.6325 ± 0.0822 | 0.6091 ± 0.0480 | −0.0234 |
 | F2-score | 0.6452 ± 0.1162 | 0.6402 ± 0.0725 | −0.0050 |
 | Accuracy | 0.7160 ± 0.0388 | 0.6720 ± 0.0601 | −0.0440 |
+| AUC-ROC | 0.7383 ± 0.0829 | 0.7124 ± 0.0426 | −0.0259 |
+| RMSE | 0.4418 ± 0.0349 | 0.4694 ± 0.0270 | +0.0276 |
 
 Cross-validation shows a mixed result. Synthetic augmentation slightly improves mean recall and reduces recall variance, but it lowers precision, F1, F2, and accuracy. Therefore, the thresholded experiment should not be described as a general CV-performance improvement. Its better interpretation is:
 
@@ -120,6 +125,8 @@ The synthetic-augmented model narrows the recall range. Its worst fold is higher
 | F1-score | 0.6316 | 0.6364 | +0.0048 |
 | F2-score | 0.5941 | 0.6542 | +0.0601 |
 | Accuracy | 0.7407 | 0.7037 | −0.0370 |
+| AUC-ROC | 0.7641 | 0.7561 | −0.0079 |
+| RMSE | 0.4317 | 0.4492 | +0.0175 |
 
 On the held-out test set, thresholded synthetic augmentation improves recall and F2-score. The trade-off is lower precision and accuracy. This supports the synthetic-augmented model for **recall-oriented screening**, not for maximizing overall accuracy.
 
@@ -163,6 +170,8 @@ The no-threshold experiment selects a synthetic-augmented configuration with the
 | F1-score | 0.6052 ± 0.0791 | 0.6041 ± 0.0521 | −0.0011 |
 | F2-score | 0.5969 ± 0.1149 | 0.6269 ± 0.0863 | +0.0300 |
 | Accuracy | 0.7120 ± 0.0325 | 0.6800 ± 0.0358 | −0.0320 |
+| AUC-ROC | 0.7383 ± 0.0829 | 0.7115 ± 0.0436 | −0.0268 |
+| RMSE | 0.4418 ± 0.0349 | 0.4652 ± 0.0230 | +0.0235 |
 
 Without thresholding, synthetic augmentation improves mean recall and F2-score in cross-validation and also reduces their variability. Precision and accuracy remain lower, which is expected because the synthetic-augmented model is more sensitive to At-Risk cases.
 
@@ -188,6 +197,8 @@ Synthetic augmentation again narrows the recall range relative to the real-only 
 | F1-score | 0.5946 | 0.6364 | +0.0418 |
 | F2-score | 0.5500 | 0.6542 | +0.1042 |
 | Accuracy | 0.7222 | 0.7037 | −0.0185 |
+| AUC-ROC | 0.7641 | 0.7561 | −0.0079 |
+| RMSE | 0.4317 | 0.4492 | +0.0175 |
 
 The no-threshold experiment confirms the main finding: synthetic augmentation improves held-out recall and F2-score even when no explicit threshold optimization is applied.
 
@@ -211,10 +222,14 @@ The synthetic-augmented model again shows better CV-to-test consistency than the
 | CV Recall | 0.6663 ± 0.0985 | 0.6458 ± 0.1123 | +0.0205 |
 | CV F2-score | 0.6402 ± 0.0725 | 0.6269 ± 0.0863 | +0.0133 |
 | CV Precision | 0.5738 ± 0.0662 | 0.5797 ± 0.0431 | −0.0059 |
+| CV AUC-ROC | 0.7124 ± 0.0426 | 0.7115 ± 0.0436 | +0.0009 |
+| CV RMSE | 0.4694 ± 0.0270 | 0.4652 ± 0.0230 | +0.0042 |
 | Test Recall | 0.6667 | 0.6667 | 0.0000 |
 | Test F2-score | 0.6542 | 0.6542 | 0.0000 |
 | Test Precision | 0.6087 | 0.6087 | 0.0000 |
 | Test Accuracy | 0.7037 | 0.7037 | 0.0000 |
+| Test AUC-ROC | 0.7561 | 0.7561 | 0.0000 |
+| Test RMSE | 0.4492 | 0.4492 | 0.0000 |
 
 For the synthetic-augmented model, thresholding gives slightly better cross-validation recall and F2, but it does not change the held-out test predictions in this run. The same test samples are classified identically under the selected thresholded and non-thresholded synthetic-augmented models.
 
@@ -227,12 +242,18 @@ This means thresholding is not necessary to obtain the synthetic-augmented model
 | CV Recall | 0.6568 ± 0.1416 | 0.5942 ± 0.1410 | +0.0626 |
 | CV F2-score | 0.6452 ± 0.1162 | 0.5969 ± 0.1149 | +0.0483 |
 | CV Precision | 0.6238 ± 0.0516 | 0.6311 ± 0.0370 | −0.0073 |
+| CV AUC-ROC | 0.7383 ± 0.0829 | 0.7383 ± 0.0829 | 0.0000 |
+| CV RMSE | 0.4418 ± 0.0349 | 0.4418 ± 0.0349 | 0.0000 |
 | Test Recall | 0.5714 | 0.5238 | +0.0476 |
 | Test F2-score | 0.5941 | 0.5500 | +0.0441 |
 | Test Precision | 0.7059 | 0.6875 | +0.0184 |
 | Test Accuracy | 0.7407 | 0.7222 | +0.0185 |
+| Test AUC-ROC | 0.7641 | 0.7641 | 0.0000 |
+| Test RMSE | 0.4317 | 0.4317 | 0.0000 |
 
 Thresholding benefits the real-only model more clearly than the synthetic-augmented model. This likely occurs because the real-only training set remains class-imbalanced, while synthetic augmentation already balances the At-Risk and Typical classes in the training data.
+
+Note that AUC-ROC and RMSE are identical across thresholded and non-thresholded variants for the same condition, because both metrics are computed from `predict_proba()` output, which is independent of the classification threshold. Thresholding only affects the discrete class predictions (and therefore recall, precision, F1, F2, accuracy).
 
 ---
 

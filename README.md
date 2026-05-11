@@ -122,6 +122,7 @@ The tree splits only on raw task features during deployment training. Derived fe
 - gain-ratio split selection
 - error-based pruning controlled by `conf_fact`
 - optional threshold candidate capping via `max_thresholds`
+- Laplace-smoothed probability estimation via `predict_proba()`
 - global split-based feature importance
 - per-sample diagnostic output
 - pickle-based save/load helpers
@@ -160,6 +161,15 @@ DiagnosticOutput(
 
 Confidence is computed from leaf class counts with Laplace smoothing. Path features contribute to task importance and domain severity using gain ratio / information gain and z-score magnitude. Derived features do not appear as split nodes, so they contribute diagnostic signal through z-score magnitude.
 
+### Probability Estimation
+
+`predict_proba(X, positive_class=1)` returns the Laplace-smoothed probability of the positive class at each sample's leaf node. This method is used by the evaluation notebooks for AUC-ROC and RMSE computation, and by the thresholded evaluation pipeline for threshold-based classification:
+
+```python
+probs = tree.predict_proba(X_test, positive_class=1)
+predictions = (probs >= threshold).astype(int)
+```
+
 ---
 
 ## Evaluation Summary
@@ -191,6 +201,8 @@ The non-thresholded experiment was added to verify that the synthetic-augmentati
 | F1 | 0.6325 +/- 0.0822 | 0.6091 +/- 0.0480 | -0.0234 |
 | F2 | 0.6452 +/- 0.1162 | 0.6402 +/- 0.0725 | -0.0050 |
 | Accuracy | 0.7160 +/- 0.0388 | 0.6720 +/- 0.0601 | -0.0440 |
+| AUC-ROC | 0.7383 +/- 0.0829 | 0.7124 +/- 0.0426 | -0.0259 |
+| RMSE | 0.4418 +/- 0.0349 | 0.4694 +/- 0.0270 | +0.0276 |
 
 ### Thresholded Held-Out Test
 
@@ -201,6 +213,8 @@ The non-thresholded experiment was added to verify that the synthetic-augmentati
 | F1 | 0.6316 | 0.6364 | +0.0048 |
 | F2 | 0.5941 | 0.6542 | +0.0601 |
 | Accuracy | 0.7407 | 0.7037 | -0.0370 |
+| AUC-ROC | 0.7641 | 0.7561 | -0.0079 |
+| RMSE | 0.4317 | 0.4492 | +0.0175 |
 
 ### Non-Thresholded Cross-Validation
 
@@ -211,6 +225,8 @@ The non-thresholded experiment was added to verify that the synthetic-augmentati
 | F1 | 0.6052 +/- 0.0791 | 0.6041 +/- 0.0521 | -0.0011 |
 | F2 | 0.5969 +/- 0.1149 | 0.6269 +/- 0.0863 | +0.0300 |
 | Accuracy | 0.7120 +/- 0.0325 | 0.6800 +/- 0.0358 | -0.0320 |
+| AUC-ROC | 0.7383 +/- 0.0829 | 0.7115 +/- 0.0436 | -0.0268 |
+| RMSE | 0.4418 +/- 0.0349 | 0.4652 +/- 0.0230 | +0.0235 |
 
 ### Non-Thresholded Held-Out Test
 
@@ -221,6 +237,8 @@ The non-thresholded experiment was added to verify that the synthetic-augmentati
 | F1 | 0.5946 | 0.6364 | +0.0418 |
 | F2 | 0.5500 | 0.6542 | +0.1042 |
 | Accuracy | 0.7222 | 0.7037 | -0.0185 |
+| AUC-ROC | 0.7641 | 0.7561 | -0.0079 |
+| RMSE | 0.4317 | 0.4492 | +0.0175 |
 
 Across both variants, TSTR improves held-out recall and F2, with the expected screening trade-off of lower precision and accuracy. In this run, the thresholded and non-thresholded TSTR models produce identical held-out test metrics, so the TSTR improvement is not dependent on threshold optimization alone.
 
@@ -359,16 +377,16 @@ df = pd.read_csv("datasets/processed/test_deployment.csv")
 X = df[["NC", "DM", "NS", "ADD", "SUB", "CA", "NP", "SN", "AF", "BC", "AS", "PF"]]
 
 diagnostics = tree.predict_with_diagnostics(X)
-probs = [
-    d.confidence if int(d.predicted_class) == 1 else 1 - d.confidence
-    for d in diagnostics
-]
+
+# Probability-based classification using predict_proba
+probs = tree.predict_proba(X, positive_class=1)
 predictions = [1 if p >= threshold else 0 for p in probs]
 
 first = diagnostics[0]
 print(first.decision_path_readable)
 print(first.domain_severity_scores)
 print(first.task_importance_scores)
+print(f"P(At-Risk) = {probs[0]:.4f}, Prediction = {predictions[0]}")
 ```
 
 ---
