@@ -6,9 +6,10 @@ and saves the complete model package to disk.
 
 Usage
 -----
-    python train.py                                    # TSTR mode
+    python train.py                                    # TSTR mode with thresholding
     python train.py --out models/v1.pkl
     python train.py --no-synth                         # TRTR mode (real data only)
+    python train.py --no-threshold                     # Native C4.5 prediction mode
 
 Output
 ------
@@ -68,6 +69,9 @@ RAW_FEATURES = [
     "NC", "DM", "NS", "ADD", "SUB", "CA",
 ]
 
+# Derived features are retained in X for diagnostics, but are intentionally
+# excluded from tree splits because they are deterministic transformations of
+# raw task scores and would create redundant split candidates.
 DIAGNOSTIC_FEATURES = [
     "NC", "DM", "NS", "ADD", "SUB", "CA",
     "NP", "SN", "AF", "BC", "AS", "PF",
@@ -78,18 +82,30 @@ LABEL_COL = "Label"
 # ─────────────────────────────────────────────
 # Hyperparameters  (fixed from evaluation)
 # ─────────────────────────────────────────────
-TRTR_BEST_PARAMS = {
-    "conf_fact":        0.25,
+TRTR_THRESHOLDED_PARAMS = {
+    "conf_fact":        0.50,
     "min_samples_leaf": 10,
-    "max_depth":        5,
+    "max_depth":        6,
     "threshold":        0.35,
 }
 
-TSTR_BEST_PARAMS = {
+TSTR_THRESHOLDED_PARAMS = {
     "conf_fact":        0.4,
     "min_samples_leaf": 11,
     "max_depth":        7,
     "threshold":        0.40,
+}
+
+TRTR_NO_THRESHOLD_PARAMS = {
+    "conf_fact":        0.50,
+    "min_samples_leaf": 10,
+    "max_depth":        6,
+}
+
+TSTR_NO_THRESHOLD_PARAMS = {
+    "conf_fact":        0.25,
+    "min_samples_leaf": 11,
+    "max_depth":        7,
 }
 
 # ─────────────────────────────────────────────
@@ -124,8 +140,7 @@ def get_probs(tree: C45DecisionTree, X: pd.DataFrame) -> list[float]:
     return probs
 
 
-def compute_metrics(y_true, probs: list[float], threshold: float) -> dict:
-    preds = [1 if p >= threshold else 0 for p in probs]
+def compute_metrics(y_true, preds) -> dict:
     return {
         "recall":    recall_score(y_true, preds, zero_division=0),
         "precision": precision_score(y_true, preds, zero_division=0),
@@ -135,9 +150,23 @@ def compute_metrics(y_true, probs: list[float], threshold: float) -> dict:
     }
 
 
-def print_metrics(label: str, m: dict, threshold: float):
+def predict_for_evaluation(tree: C45DecisionTree, X: pd.DataFrame, threshold: float | None):
+    if threshold is None:
+        preds = tree.predict(X).astype(int)
+        probs = get_probs(tree, X)
+        return preds, probs
+
+    probs = get_probs(tree, X)
+    preds = [1 if p >= threshold else 0 for p in probs]
+    return preds, probs
+
+
+def print_metrics(label: str, m: dict, threshold: float | None):
     log.info(f"── {label} ──────────────────────────────")
-    log.info(f"  Threshold : {threshold:.2f}")
+    if threshold is None:
+        log.info("  Prediction: native C4.5 class output")
+    else:
+        log.info(f"  Threshold : {threshold:.2f}")
     log.info(f"  Recall    : {m['recall']:.4f}")
     log.info(f"  Precision : {m['precision']:.4f}")
     log.info(f"  F1        : {m['f1']:.4f}")
@@ -186,7 +215,7 @@ def export_tree_svg(tree_model: C45DecisionTree, base_filename: str) -> None:
         dot.render(base_filename, format='svg', cleanup=True)
 
 
-def demonstrate_model(model_path: str) -> None:
+def demonstrate_model(model_path: str, use_thresholding: bool) -> None:
     """Loads the saved model structure from disk, evaluates on test data, and outputs 10 diagnostics."""
     log.info("\n" + "=" * 60)
     log.info("Demonstrating Loaded Model on Unseen Test Set")
@@ -203,14 +232,20 @@ def demonstrate_model(model_path: str) -> None:
     diagnostics = loaded_tree.predict_with_diagnostics(X_test)
     final_probs = get_probs(loaded_tree, X_test)
 
-    test_metrics = compute_metrics(y_test, final_probs, optimal_threshold)
-    print_metrics(f"Test metrics at locked threshold={optimal_threshold:.2f}", test_metrics, optimal_threshold)
+    threshold = optimal_threshold if use_thresholding else None
+    test_preds, final_probs = predict_for_evaluation(loaded_tree, X_test, threshold)
+    test_metrics = compute_metrics(y_test, test_preds)
+
+    if use_thresholding:
+        print_metrics(f"Test metrics at locked threshold={optimal_threshold:.2f}", test_metrics, threshold)
+    else:
+        print_metrics("Test metrics with native C4.5 predictions", test_metrics, threshold)
 
     # 5. Output Sample Diagnostics
     log.info(f"\n[Sample Diagnostics for First 10 Tests]")
     for i, diag in enumerate(diagnostics[:10]):
         prob = final_probs[i]
-        pred_class = 1 if prob >= optimal_threshold else 0
+        pred_class = test_preds[i]
         pred_label = "At-Risk (1)" if pred_class == 1 else "Typical (0)"
 
         # String formatting for the task importance dictionary
@@ -228,7 +263,7 @@ def demonstrate_model(model_path: str) -> None:
 # ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
-def train(out_path: str, use_synth: bool) -> None:
+def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
     log.info("=" * 60)
     log.info("FunaDB C4.5 Deployment Training")
     log.info("=" * 60)
@@ -243,15 +278,29 @@ def train(out_path: str, use_synth: bool) -> None:
         s_train  = load_csv("datasets/processed/s_train_deployment.csv", "synthetic train")
         train_df = pd.concat([r_train, s_train], ignore_index=True)
         mode     = "Synthetic-Augmented (TSTR)"
-        params   = TSTR_BEST_PARAMS.copy()
+        params   = (
+            TSTR_THRESHOLDED_PARAMS.copy()
+            if use_thresholding
+            else TSTR_NO_THRESHOLD_PARAMS.copy()
+        )
     else:
         train_df = r_train.copy()
         mode     = "Real-Only (TRTR)"
-        params   = TRTR_BEST_PARAMS.copy()
+        params   = (
+            TRTR_THRESHOLDED_PARAMS.copy()
+            if use_thresholding
+            else TRTR_NO_THRESHOLD_PARAMS.copy()
+        )
 
-    threshold = params.pop("threshold")
+    threshold = params.pop("threshold", None)
+    prediction_rule = (
+        f"Probability threshold at {threshold:.2f}"
+        if use_thresholding
+        else "Native C4.5 class prediction"
+    )
 
     log.info(f"Mode         : {mode}")
+    log.info(f"Prediction   : {prediction_rule}")
     log.info(f"Train shape  : {train_df.shape}")
     log.info(f"Val shape    : {val_df.shape}")
     log.info(f"Test shape   : {test_df.shape}")
@@ -269,23 +318,26 @@ def train(out_path: str, use_synth: bool) -> None:
     log.info(f"Tree leaves : {tree.get_leaves_num()}")
 
     # ── 3. Evaluate validation set ────────────────────────────
-    log.info("\n[3/6] Evaluating validation set with raw tree probabilities...")
-    val_probs   = get_probs(tree, X_val)
-    val_metrics = compute_metrics(y_val, val_probs, threshold)
-    print_metrics(f"Validation metrics at threshold={threshold:.2f}", val_metrics, threshold)
+    log.info("\n[3/6] Evaluating validation set...")
+    val_preds, _ = predict_for_evaluation(tree, X_val, threshold)
+    val_metrics = compute_metrics(y_val, val_preds)
+    print_metrics("Validation metrics", val_metrics, threshold)
 
     # ── 4. Evaluate test set ──────────────────────────────────
-    log.info("\n[4/6] Evaluating held-out test set with raw tree probabilities...")
-    test_probs   = get_probs(tree, X_test)
-    test_metrics = compute_metrics(y_test, test_probs, threshold)
-    print_metrics(f"Test metrics at threshold={threshold:.2f}", test_metrics, threshold)
+    log.info("\n[4/6] Evaluating held-out test set...")
+    test_preds, _ = predict_for_evaluation(tree, X_test, threshold)
+    test_metrics = compute_metrics(y_test, test_preds)
+    print_metrics("Test metrics", test_metrics, threshold)
 
     # ── 5. Save model ─────────────────────────────────────────
     log.info("\n[5/6] Saving model...")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    tree.save_model(str(out), optimal_threshold=threshold)
+    saved_threshold = threshold if threshold is not None else 0.50
+    tree.save_model(str(out), optimal_threshold=saved_threshold)
+    if threshold is None:
+        log.info("Saved threshold 0.50 for package compatibility; this run used native C4.5 predictions.")
     log.info(f"Model saved → {out.resolve()}")
     
     # ── 6. Save Tree Visualization ────────────────────────────
@@ -315,11 +367,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Train on real data only (TRTR mode). Default is TSTR (real + synthetic).",
     )
+    parser.add_argument(
+        "--no-threshold",
+        action="store_true",
+        help="Use native C4.5 class predictions instead of the validation-selected probability threshold.",
+    )
     args = parser.parse_args()
 
     try:
-        train(out_path=args.out, use_synth=not args.no_synth)
-        demonstrate_model(model_path=args.out)
+        use_thresholding = not args.no_threshold
+        train(out_path=args.out, use_synth=not args.no_synth, use_thresholding=use_thresholding)
+        demonstrate_model(model_path=args.out, use_thresholding=use_thresholding)
     except FileNotFoundError as e:
         log.error(f"Dataset not found: {e}")
         sys.exit(1)

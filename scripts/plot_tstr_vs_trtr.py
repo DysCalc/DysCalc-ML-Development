@@ -1,175 +1,472 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
-import os
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+
+METRICS = [
+    ("fbeta", "F2", True),
+    ("recall", "Recall", True),
+    ("precision", "Precision", True),
+    ("f1", "F1", True),
+    ("accuracy", "Accuracy", True),
+    ("auc", "AUC-ROC", True),
+    ("rmse", "RMSE", False),
+]
+
+EXPERIMENTS = [
+    {
+        "key": "thresholded",
+        "label": "Thresholded",
+        "grid_suffix": "",
+        "tie_suffix": "",
+        "has_threshold": True,
+    },
+    {
+        "key": "no_threshold",
+        "label": "Non-thresholded",
+        "grid_suffix": "_no_threshold",
+        "tie_suffix": "_no_threshold",
+        "has_threshold": False,
+    },
+]
+
+CONDITION_LABELS = {
+    "trtr": "TRTR (Real Only)",
+    "tstr": "TSTR (Synthetic-Augmented)",
+}
+
+CONDITION_COLORS = {
+    "trtr": "#5DADE2",
+    "tstr": "#E74C3C",
+}
+
+
+def load_csv(path):
+    if not path.exists():
+        print(f"Missing optional file: {path}")
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
 
 def load_data(base_dir):
-    grid_dir = base_dir / 'outputs' / 'grid_search'
-    
+    grid_dir = base_dir / "outputs" / "grid_search"
     print(f"Loading data from: {grid_dir}")
-    trtr_grid = pd.read_csv(grid_dir / 'trtr_grid_search_results.csv')
-    tstr_grid = pd.read_csv(grid_dir / 'tstr_grid_search_results.csv')
-    
-    trtr_tie_path = grid_dir / 'trtr_validation_tie_cv_results.csv'
-    tstr_tie_path = grid_dir / 'tstr_validation_tie_cv_results.csv'
-    
-    trtr_tie = pd.read_csv(trtr_tie_path) if trtr_tie_path.exists() else pd.DataFrame()
-    tstr_tie = pd.read_csv(tstr_tie_path) if tstr_tie_path.exists() else pd.DataFrame()
-    
-    return trtr_grid, tstr_grid, trtr_tie, tstr_tie
 
-def analyze_and_plot(trtr_grid, tstr_grid, trtr_tie, tstr_tie, output_dir):
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 1. Best scores overall (validation)
-    best_trtr_idx = trtr_grid['fbeta'].idxmax()
-    best_tstr_idx = tstr_grid['fbeta'].idxmax()
-    
-    best_trtr_f2 = trtr_grid.loc[best_trtr_idx, 'fbeta']
-    best_tstr_f2 = tstr_grid.loc[best_tstr_idx, 'fbeta']
-    
-    best_trtr_recall = trtr_grid.loc[best_trtr_idx, 'recall']
-    best_tstr_recall = tstr_grid.loc[best_tstr_idx, 'recall']
-    
-    best_trtr_prec = trtr_grid.loc[best_trtr_idx, 'precision']
-    best_tstr_prec = tstr_grid.loc[best_tstr_idx, 'precision']
-    
-    with open(output_dir / 'analysis_report.txt', 'w') as f:
-        f.write("=== TSTR vs TRTR Analysis Report ===\n\n")
-        f.write(f"TRTR Best F2: {best_trtr_f2:.4f} (Recall: {best_trtr_recall:.4f}, Precision: {best_trtr_prec:.4f})\n")
-        f.write(f"TSTR Best F2: {best_tstr_f2:.4f} (Recall: {best_tstr_recall:.4f}, Precision: {best_tstr_prec:.4f})\n")
-        f.write(f"\nTSTR Improvement in F2 over TRTR: {best_tstr_f2 - best_trtr_f2:.4f}\n")
-        f.write(f"TSTR Improvement in Recall over TRTR: {best_tstr_recall - best_trtr_recall:.4f}\n")
-        f.write(f"TSTR Improvement in Precision over TRTR: {best_tstr_prec - best_trtr_prec:.4f}\n")
-        
-        f.write("\n=== Tie Candidates CV Performance ===\n")
-        if not trtr_tie.empty and not tstr_tie.empty:
-            f.write(f"TRTR - Tie CV Mean F2: {trtr_tie['cv_mean_fbeta'].mean():.4f} +/- {trtr_tie['cv_mean_fbeta'].std():.4f}\n")
-            f.write(f"TSTR - Tie CV Mean F2: {tstr_tie['cv_mean_fbeta'].mean():.4f} +/- {tstr_tie['cv_mean_fbeta'].std():.4f}\n")
-            f.write(f"TRTR - Tie CV Mean Recall: {trtr_tie['cv_mean_recall'].mean():.4f} +/- {trtr_tie['cv_mean_recall'].std():.4f}\n")
-            f.write(f"TSTR - Tie CV Mean Recall: {tstr_tie['cv_mean_recall'].mean():.4f} +/- {tstr_tie['cv_mean_recall'].std():.4f}\n")
-        else:
-            f.write("Tie CV results are missing for TRTR or TSTR.\n")
-            
-    print(open(output_dir / 'analysis_report.txt').read())
-    
-    # 1. Bar Plot of Best F2 and Recall
-    fig, ax = plt.subplots(figsize=(8, 6))
-    metrics = ['Best F2 Score', 'Corresponding Recall', 'Corresponding Precision']
-    trtr_vals = [best_trtr_f2, best_trtr_recall, best_trtr_prec]
-    tstr_vals = [best_tstr_f2, best_tstr_recall, best_tstr_prec]
-    
-    x = range(len(metrics))
-    width = 0.35
-    bars1 = ax.bar([i - width/2 for i in x], trtr_vals, width, label='TRTR (Real Only)', color='skyblue')
-    bars2 = ax.bar([i + width/2 for i in x], tstr_vals, width, label='TSTR (Real + Synthetic)', color='salmon')
-    
-    ax.set_ylabel('Score')
-    ax.set_title('TRTR vs TSTR: Best Validation Performance')
-    ax.set_xticks(x)
-    ax.set_xticklabels(metrics)
-    ax.legend(loc='lower left')
-    ax.set_ylim(0, 1.1)
-    
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2, yval + 0.01, f"{yval:.3f}", ha='center')
-        
+    data = {}
+    for experiment in EXPERIMENTS:
+        key = experiment["key"]
+        grid_suffix = experiment["grid_suffix"]
+        tie_suffix = experiment["tie_suffix"]
+
+        data[key] = {
+            "meta": experiment,
+            "trtr_grid": load_csv(grid_dir / f"trtr{grid_suffix}_grid_search_results.csv"),
+            "tstr_grid": load_csv(grid_dir / f"tstr{grid_suffix}_grid_search_results.csv"),
+            "trtr_tie": load_csv(grid_dir / f"trtr_validation_tie{tie_suffix}_cv_results.csv"),
+            "tstr_tie": load_csv(grid_dir / f"tstr_validation_tie{tie_suffix}_cv_results.csv"),
+        }
+
+    return data
+
+
+def best_validation_row(grid):
+    if grid.empty:
+        return None
+    return grid.loc[grid["fbeta"].idxmax()]
+
+
+def selected_cv_row(tie_results):
+    if tie_results.empty:
+        return None
+    # The notebooks sort tied candidates by their tie-resolution policy before export.
+    return tie_results.iloc[0]
+
+
+def format_metric(value):
+    if pd.isna(value):
+        return "N/A"
+    return f"{value:.4f}"
+
+
+def format_metric_with_std(mean_value, std_value):
+    if pd.isna(mean_value):
+        return "N/A"
+    if pd.isna(std_value):
+        return f"{mean_value:.4f}"
+    return f"{mean_value:.4f} +/- {std_value:.4f}"
+
+
+def write_validation_summary(report, experiment_label, trtr_row, tstr_row):
+    report.write(f"\n=== {experiment_label}: Best Validation Grid-Search Rows ===\n")
+    if trtr_row is None or tstr_row is None:
+        report.write("Validation grid-search results are missing for TRTR or TSTR.\n")
+        return
+
+    threshold_label = " | Threshold" if "threshold" in trtr_row.index or "threshold" in tstr_row.index else ""
+    report.write(f"Condition | {' | '.join(label for _, label, _ in METRICS)}{threshold_label}\n")
+    report.write(f"{'-' * 9} | {' | '.join('-' * len(label) for _, label, _ in METRICS)}")
+    if threshold_label:
+        report.write(" | ---------")
+    report.write("\n")
+
+    for condition, row in [("TRTR", trtr_row), ("TSTR", tstr_row)]:
+        values = [format_metric(row[col]) for col, _, _ in METRICS]
+        report.write(f"{condition} | {' | '.join(values)}")
+        if threshold_label:
+            report.write(f" | {format_metric(row.get('threshold', float('nan')))}")
+        report.write("\n")
+
+    deltas = [tstr_row[col] - trtr_row[col] for col, _, _ in METRICS]
+    report.write(f"Delta | {' | '.join(format_metric(delta) for delta in deltas)}")
+    if threshold_label:
+        report.write(" |")
+    report.write("\n")
+
+
+def write_cv_summary(report, experiment_label, trtr_row, tstr_row):
+    report.write(f"\n=== {experiment_label}: Selected Tie-Candidate CV Performance ===\n")
+    if trtr_row is None or tstr_row is None:
+        report.write("Tie CV results are missing for TRTR or TSTR.\n")
+        return
+
+    report.write("Metric | TRTR mean +/- std | TSTR mean +/- std | Delta\n")
+    report.write("------ | ----------------- | ----------------- | -----\n")
+    for metric_col, metric_label, _ in METRICS:
+        mean_col = f"cv_mean_{metric_col}"
+        std_col = f"cv_std_{metric_col}"
+        trtr_mean = trtr_row.get(mean_col, float("nan"))
+        trtr_std = trtr_row.get(std_col, float("nan"))
+        tstr_mean = tstr_row.get(mean_col, float("nan"))
+        tstr_std = tstr_row.get(std_col, float("nan"))
+        report.write(
+            f"{metric_label} | "
+            f"{format_metric_with_std(trtr_mean, trtr_std)} | "
+            f"{format_metric_with_std(tstr_mean, tstr_std)} | "
+            f"{format_metric(tstr_mean - trtr_mean)}\n"
+        )
+
+
+def write_analysis_report(data, output_dir):
+    report_path = output_dir / "analysis_report.txt"
+    with open(report_path, "w") as report:
+        report.write("=== Synthetic-Augmented vs Real-Only C4.5 Analysis Report ===\n")
+        report.write("Generated by scripts/plot_tstr_vs_trtr.py\n\n")
+
+        report.write("Input row counts:\n")
+        for experiment_key, experiment_data in data.items():
+            label = experiment_data["meta"]["label"]
+            report.write(
+                f"- {label}: "
+                f"TRTR grid={len(experiment_data['trtr_grid'])}, "
+                f"TSTR grid={len(experiment_data['tstr_grid'])}, "
+                f"TRTR tie CV={len(experiment_data['trtr_tie'])}, "
+                f"TSTR tie CV={len(experiment_data['tstr_tie'])}\n"
+            )
+
+        for experiment_key, experiment_data in data.items():
+            label = experiment_data["meta"]["label"]
+            trtr_best = best_validation_row(experiment_data["trtr_grid"])
+            tstr_best = best_validation_row(experiment_data["tstr_grid"])
+            trtr_cv = selected_cv_row(experiment_data["trtr_tie"])
+            tstr_cv = selected_cv_row(experiment_data["tstr_tie"])
+
+            write_validation_summary(report, label, trtr_best, tstr_best)
+            write_cv_summary(report, label, trtr_cv, tstr_cv)
+
+        report.write("\nMetric note: RMSE is lower-is-better; all other listed metrics are higher-is-better.\n")
+
+    print(report_path.read_text())
+
+
+def build_validation_plot_data(data):
+    rows = []
+    for experiment_key, experiment_data in data.items():
+        experiment_label = experiment_data["meta"]["label"]
+        for condition_key in ["trtr", "tstr"]:
+            row = best_validation_row(experiment_data[f"{condition_key}_grid"])
+            if row is None:
+                continue
+            for metric_col, metric_label, _ in METRICS:
+                rows.append(
+                    {
+                        "Experiment": experiment_label,
+                        "Condition": CONDITION_LABELS[condition_key],
+                        "Metric": metric_label,
+                        "Value": row[metric_col],
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def build_selected_cv_plot_data(data):
+    rows = []
+    for experiment_key, experiment_data in data.items():
+        experiment_label = experiment_data["meta"]["label"]
+        for condition_key in ["trtr", "tstr"]:
+            row = selected_cv_row(experiment_data[f"{condition_key}_tie"])
+            if row is None:
+                continue
+            for metric_col, metric_label, _ in METRICS:
+                rows.append(
+                    {
+                        "Experiment": experiment_label,
+                        "Condition": CONDITION_LABELS[condition_key],
+                        "Metric": metric_label,
+                        "Value": row[f"cv_mean_{metric_col}"],
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def plot_metric_comparison(plot_data, output_path, title):
+    if plot_data.empty:
+        return
+
+    experiments = list(plot_data["Experiment"].drop_duplicates())
+    fig, axes = plt.subplots(1, len(experiments), figsize=(8 * len(experiments), 5), sharey=True)
+    if len(experiments) == 1:
+        axes = [axes]
+
+    for ax, experiment in zip(axes, experiments):
+        subset = plot_data[plot_data["Experiment"] == experiment]
+        sns.barplot(
+            data=subset,
+            x="Metric",
+            y="Value",
+            hue="Condition",
+            palette=[CONDITION_COLORS["trtr"], CONDITION_COLORS["tstr"]],
+            ax=ax,
+        )
+        ax.set_title(experiment)
+        ax.set_xlabel("")
+        ax.set_ylabel("Score")
+        ax.set_ylim(0, 1.05)
+        ax.tick_params(axis="x", rotation=35)
+        ax.grid(axis="y", linestyle=":", alpha=0.4)
+        ax.legend(loc="lower left")
+
+    fig.suptitle(title)
     plt.tight_layout()
-    plt.savefig(output_dir / 'best_performance_comparison.png', dpi=300)
+    plt.savefig(output_path, dpi=300)
     plt.close()
-    
-    # 2. Precision-Recall Tradeoff across thresholds
+
+
+def plot_precision_recall_tradeoff(experiment_data, output_dir):
+    trtr_grid = experiment_data["trtr_grid"]
+    tstr_grid = experiment_data["tstr_grid"]
+    if trtr_grid.empty or tstr_grid.empty:
+        return
+
+    trtr_best = best_validation_row(trtr_grid)
+    tstr_best = best_validation_row(tstr_grid)
+
     plt.figure(figsize=(10, 6))
-    # We will sample to avoid plotting too many points and making it unreadable
     trtr_sample = trtr_grid.sample(n=min(5000, len(trtr_grid)), random_state=42)
     tstr_sample = tstr_grid.sample(n=min(5000, len(tstr_grid)), random_state=42)
-    
-    plt.scatter(trtr_sample['recall'], trtr_sample['precision'], c='skyblue', alpha=0.5, label='TRTR', marker='o', s=15)
-    plt.scatter(tstr_sample['recall'], tstr_sample['precision'], c='salmon', alpha=0.5, label='TSTR', marker='x', s=15)
-    
-    # Highlight the best points
-    plt.scatter([best_trtr_recall], [best_trtr_prec], color='blue', edgecolors='black', s=150, label='TRTR Best F2', marker='*')
-    plt.scatter([best_tstr_recall], [best_tstr_prec], color='red', edgecolors='black', s=150, label='TSTR Best F2', marker='*')
 
-    plt.title('Precision vs Recall Tradeoff across Hyperparameters & Thresholds')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
+    plt.scatter(
+        trtr_sample["recall"],
+        trtr_sample["precision"],
+        c=CONDITION_COLORS["trtr"],
+        alpha=0.5,
+        label=CONDITION_LABELS["trtr"],
+        marker="o",
+        s=15,
+    )
+    plt.scatter(
+        tstr_sample["recall"],
+        tstr_sample["precision"],
+        c=CONDITION_COLORS["tstr"],
+        alpha=0.5,
+        label=CONDITION_LABELS["tstr"],
+        marker="x",
+        s=15,
+    )
+
+    plt.scatter(
+        [trtr_best["recall"]],
+        [trtr_best["precision"]],
+        color="#1F4E79",
+        edgecolors="black",
+        s=150,
+        label="TRTR Best F2",
+        marker="*",
+    )
+    plt.scatter(
+        [tstr_best["recall"]],
+        [tstr_best["precision"]],
+        color="#922B21",
+        edgecolors="black",
+        s=150,
+        label="TSTR Best F2",
+        marker="*",
+    )
+
+    plt.title("Thresholded Precision vs Recall across Hyperparameters and Thresholds")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
     plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
-    plt.savefig(output_dir / 'precision_recall_tradeoff.png', dpi=300)
+    plt.savefig(output_dir / "precision_recall_tradeoff.png", dpi=300)
     plt.close()
-    
-    # 3. CV Results Distribution (if tie CV results are populated)
-    if not trtr_tie.empty and not tstr_tie.empty:
-        # Prepare data for plotting
-        trtr_tie_plt = trtr_tie.copy()
-        trtr_tie_plt['Model'] = 'TRTR'
-        
-        tstr_tie_plt = tstr_tie.copy()
-        tstr_tie_plt['Model'] = 'TSTR'
-        
-        combined_cv = pd.concat([trtr_tie_plt, tstr_tie_plt], ignore_index=True)
-        
-        plt.figure(figsize=(8, 6))
-        sns.boxplot(data=combined_cv, x='Model', y='cv_mean_fbeta', palette='Set2', hue='Model', legend=False)
-        sns.stripplot(data=combined_cv, x='Model', y='cv_mean_fbeta', color=".3", size=4, jitter=True)
-        plt.title('Distribution of CV Mean F2 Scores among Tie Candidates')
-        plt.ylabel('CV Mean F2 Score')
+
+
+def build_cv_distribution_data(data):
+    rows = []
+    for experiment_key, experiment_data in data.items():
+        experiment_label = experiment_data["meta"]["label"]
+        for condition_key in ["trtr", "tstr"]:
+            tie_results = experiment_data[f"{condition_key}_tie"]
+            if tie_results.empty:
+                continue
+            for _, row in tie_results.iterrows():
+                for metric_col, metric_label, _ in METRICS:
+                    rows.append(
+                        {
+                            "Run": f"{experiment_label}\n{condition_key.upper()}",
+                            "Metric": metric_label,
+                            "Value": row[f"cv_mean_{metric_col}"],
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
+def plot_cv_distributions(data, output_dir):
+    cv_data = build_cv_distribution_data(data)
+    if cv_data.empty:
+        return
+
+    metric_files = {
+        "F2": "cv_f2_distribution.png",
+        "Recall": "cv_recall_distribution.png",
+        "AUC-ROC": "cv_auc_distribution.png",
+        "RMSE": "cv_rmse_distribution.png",
+    }
+
+    for metric_label, filename in metric_files.items():
+        subset = cv_data[cv_data["Metric"] == metric_label]
+        if subset.empty:
+            continue
+
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(data=subset, x="Run", y="Value", color="#D6EAF8")
+        sns.stripplot(data=subset, x="Run", y="Value", color=".25", size=3, jitter=True)
+        direction = "lower is better" if metric_label == "RMSE" else "higher is better"
+        plt.title(f"Distribution of Selected-Candidate CV Mean {metric_label} ({direction})")
+        plt.xlabel("")
+        plt.ylabel(f"CV Mean {metric_label}")
         plt.tight_layout()
-        plt.savefig(output_dir / 'cv_f2_distribution.png', dpi=300)
+        plt.savefig(output_dir / filename, dpi=300)
         plt.close()
-        
-        plt.figure(figsize=(8, 6))
-        sns.boxplot(data=combined_cv, x='Model', y='cv_mean_recall', palette='Set3', hue='Model', legend=False)
-        sns.stripplot(data=combined_cv, x='Model', y='cv_mean_recall', color=".3", size=4, jitter=True)
-        plt.title('Distribution of CV Mean Recall among Tie Candidates')
-        plt.ylabel('CV Mean Recall')
-        plt.tight_layout()
-        plt.savefig(output_dir / 'cv_recall_distribution.png', dpi=300)
-        plt.close()
-        
-    # 4. Trend Charts for Hyperparameters
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+
+def plot_hyperparameter_trends(experiment_data, output_path, title):
+    trtr_grid = experiment_data["trtr_grid"]
+    tstr_grid = experiment_data["tstr_grid"]
+    if trtr_grid.empty or tstr_grid.empty:
+        return
+
+    configs = ["max_depth", "min_samples_leaf", "conf_fact"]
+    if experiment_data["meta"]["has_threshold"]:
+        configs.append("threshold")
+
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     axes = axes.flatten()
-    configs = ['max_depth', 'min_samples_leaf', 'conf_fact', 'threshold']
-    
+
     for i, config in enumerate(configs):
-        trtr_trend = trtr_grid.groupby(config)[['fbeta', 'recall']].max().reset_index()
-        tstr_trend = tstr_grid.groupby(config)[['fbeta', 'recall']].max().reset_index()
-        
         ax = axes[i]
-        
-        # Plot F2
-        ax.plot(trtr_trend[config], trtr_trend['fbeta'], label='TRTR F2', color='skyblue', marker='o', linestyle='-', linewidth=5, alpha=0.6)
-        ax.plot(tstr_trend[config], tstr_trend['fbeta'], label='TSTR F2', color='salmon', marker='o', linestyle='-', linewidth=2)
-        
-        # Plot Recall (dashed)
-        ax.plot(trtr_trend[config], trtr_trend['recall'], label='TRTR Recall', color='blue', marker='s', linestyle='--', linewidth=5, alpha=0.4)
-        ax.plot(tstr_trend[config], tstr_trend['recall'], label='TSTR Recall', color='red', marker='x', linestyle=':', linewidth=2)
-        
-        ax.set_title(f'Max F2 & Recall vs {config}')
+        for condition_key, grid in [("trtr", trtr_grid), ("tstr", tstr_grid)]:
+            color = CONDITION_COLORS[condition_key]
+            condition_label = condition_key.upper()
+
+            grouped = grid.groupby(config)
+            for metric_col, metric_label, higher_is_better in [
+                ("fbeta", "F2", True),
+                ("recall", "Recall", True),
+                ("auc", "AUC-ROC", True),
+                ("rmse", "RMSE", False),
+            ]:
+                trend = (
+                    grouped[metric_col].max().reset_index(name=metric_col)
+                    if higher_is_better
+                    else grouped[metric_col].min().reset_index(name=metric_col)
+                )
+                linestyle = "-" if metric_col in ["fbeta", "auc"] else "--"
+                marker = "o" if metric_col in ["fbeta", "recall"] else "s"
+                alpha = 0.85 if condition_key == "tstr" else 0.55
+                ax.plot(
+                    trend[config],
+                    trend[metric_col],
+                    label=f"{condition_label} {metric_label}",
+                    color=color,
+                    marker=marker,
+                    linestyle=linestyle,
+                    linewidth=2,
+                    alpha=alpha,
+                )
+
+        ax.set_title(f"Validation Metrics vs {config}")
         ax.set_xlabel(config)
-        ax.set_ylabel('Score')
-        ax.grid(True, linestyle=':', alpha=0.6)
+        ax.set_ylabel("Score")
+        ax.set_ylim(0, 1.05)
+        ax.grid(True, linestyle=":", alpha=0.6)
         if i == 0:
-            ax.legend(loc='best')
-            
+            ax.legend(loc="best", fontsize=8)
+
+    for j in range(len(configs), len(axes)):
+        axes[j].axis("off")
+
+    fig.suptitle(title)
     plt.tight_layout()
-    plt.savefig(output_dir / 'hyperparameter_trends.png', dpi=300)
+    plt.savefig(output_path, dpi=300)
     plt.close()
-        
+
+
+def analyze_and_plot(data, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    write_analysis_report(data, output_dir)
+
+    validation_plot_data = build_validation_plot_data(data)
+    plot_metric_comparison(
+        validation_plot_data,
+        output_dir / "best_performance_comparison.png",
+        "Best Validation Metrics by Experiment",
+    )
+
+    selected_cv_plot_data = build_selected_cv_plot_data(data)
+    plot_metric_comparison(
+        selected_cv_plot_data,
+        output_dir / "selected_cv_metric_comparison.png",
+        "Selected Tie-Candidate CV Mean Metrics",
+    )
+
+    plot_precision_recall_tradeoff(data["thresholded"], output_dir)
+    plot_cv_distributions(data, output_dir)
+    plot_hyperparameter_trends(
+        data["thresholded"],
+        output_dir / "hyperparameter_trends.png",
+        "Thresholded Hyperparameter Trends",
+    )
+    plot_hyperparameter_trends(
+        data["no_threshold"],
+        output_dir / "no_threshold_hyperparameter_trends.png",
+        "Non-Thresholded Hyperparameter Trends",
+    )
+
     print(f"\nFigures and analysis report saved to: {output_dir}")
+
 
 def main():
     base_dir = Path(__file__).resolve().parent.parent
-    trtr_grid, tstr_grid, trtr_tie, tstr_tie = load_data(base_dir)
-    
-    output_dir = base_dir / 'outputs' / 'figures'
-    analyze_and_plot(trtr_grid, tstr_grid, trtr_tie, tstr_tie, output_dir)
+    data = load_data(base_dir)
 
-if __name__ == '__main__':
+    output_dir = base_dir / "outputs" / "figures"
+    analyze_and_plot(data, output_dir)
+
+
+if __name__ == "__main__":
     main()

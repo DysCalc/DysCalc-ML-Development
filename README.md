@@ -23,11 +23,14 @@ DysCalc-ML-Development/
 |       |-- test_deployment.csv
 |       `-- s_train_deployment.csv
 |-- documentation/
+|   |-- C45_decision_tree.md
 |   |-- dataset_analysis.md
+|   |-- figures_analysis_documentation.md
 |   |-- synthetic_data_generation.md
 |   `-- TSTR_results.md
 |-- models/
-|   `-- v1.pkl
+|   |-- v1.pkl
+|   `-- v1_no_threshold.pkl
 |-- notebooks/
 |   |-- dataset_analysis.ipynb
 |   |-- synthetic_data_generation.ipynb
@@ -37,10 +40,15 @@ DysCalc-ML-Development/
 |   |-- figures/
 |   |   |-- analysis_report.txt
 |   |   |-- best_performance_comparison.png
+|   |   |-- selected_cv_metric_comparison.png
 |   |   |-- cv_f2_distribution.png
 |   |   |-- cv_recall_distribution.png
-|   |   |-- {model_stem}_full_tree.svg
+|   |   |-- cv_auc_distribution.png
+|   |   |-- cv_rmse_distribution.png
+|   |   |-- v1_full_tree.svg
+|   |   |-- v1_no_threshold_full_tree.svg
 |   |   |-- hyperparameter_trends.png
+|   |   |-- no_threshold_hyperparameter_trends.png
 |   |   `-- precision_recall_tradeoff.png
 |   |-- grid_search/
 |   |   |-- trtr_grid_search_results.csv
@@ -103,6 +111,8 @@ The deployment CSVs include deterministic diagnostic features:
 
 The tree splits only on raw task features during deployment training. Derived features are used for diagnostic severity and task-importance scoring.
 
+This separation is intentional. The derived features are deterministic transformations of the raw task scores, so using them as split candidates would duplicate information already available in `NC`, `DM`, `NS`, `ADD`, `SUB`, and `CA`. Keeping them out of tree training reduces redundant split opportunities and helps limit overfitting on the small FUNA-DB sample, while still allowing the derived constructs to support post-prediction interpretation.
+
 ### Current Splits
 
 | Split | Rows | Class Distribution | Composition |
@@ -141,7 +151,7 @@ C45DecisionTree(
 )
 ```
 
-`fit(X, y, raw_features)` trains the tree using `raw_features` for splits while retaining the full `X` feature set for diagnostic statistics.
+`fit(X, y, raw_features)` trains the tree using `raw_features` for splits while retaining the full `X` feature set for diagnostic statistics. In the current DysCalc pipeline, `raw_features` is fixed to the six original FUNA-DB task features so that derived diagnostic features cannot influence tree construction.
 
 ### Diagnostic Output
 
@@ -181,7 +191,9 @@ Two evaluation variants are now documented:
 - **Thresholded:** converts tree confidence to `P(At-Risk)` and applies a validation-selected cutoff.
 - **Non-thresholded:** uses the native C4.5 class prediction directly, with no post-training cutoff search.
 
-The non-thresholded experiment was added to verify that the synthetic-augmentation effect does not depend only on threshold tuning. The deployment script currently remains thresholded and uses the locked TSTR settings shown below.
+The non-thresholded experiment was added to verify that the synthetic-augmentation effect does not depend only on threshold tuning. The deployment script defaults to the thresholded TSTR settings, and `--no-threshold` switches to the evaluated native-prediction settings shown below.
+
+Selection process: the notebooks first rank the full validation grid by F2, recall, precision, F1, and accuracy. Candidates tied with the top validation row across those metrics are then re-evaluated with 5-fold stratified CV and sorted by CV F2, recall, precision, F1, and accuracy, with threshold/configuration fields used only as deterministic tie-breakers. The first exported tie-CV row becomes the locked configuration; for the thresholded experiment, that same row also locks the threshold. AUC-ROC and RMSE are reported as diagnostics, not as selection criteria.
 
 ### Selected Evaluation Settings
 
@@ -242,6 +254,8 @@ The non-thresholded experiment was added to verify that the synthetic-augmentati
 
 Across both variants, TSTR improves held-out recall and F2, with the expected screening trade-off of lower precision and accuracy. In this run, the thresholded and non-thresholded TSTR models produce identical held-out test metrics, so the TSTR improvement is not dependent on threshold optimization alone.
 
+The thresholded and non-thresholded TSTR tree visualizations can also look structurally identical. Thresholding is a post-training decision rule applied to `predict_proba()` output, so it does not change the learned split structure. The selected TSTR configurations use different `conf_fact` values (`0.40` with thresholding, `0.25` without thresholding), but those values led to the same pruning decisions for the current data. As a result, `v1_full_tree.svg` and `v1_no_threshold_full_tree.svg` can show the same splits, sample counts, gain ratios, and leaf distributions even though they came from different evaluated prediction regimes.
+
 ### TSTR Feature Importance
 
 | Feature | Importance |
@@ -268,38 +282,56 @@ python scripts/train.py
 # Real-only TRTR mode
 python scripts/train.py --no-synth
 
+# Native C4.5 prediction mode, without probability thresholding
+python scripts/train.py --no-threshold
+
 # Custom output path
 python scripts/train.py --out models/v1.pkl
+
+# Save the evaluated non-thresholded deployment package
+python scripts/train.py --no-threshold --out models/v1_no_threshold.pkl
 ```
 
-Current locked parameters in `scripts/train.py`:
+Current selected parameters in `scripts/train.py`:
 
 ```python
-TRTR_BEST_PARAMS = {
-    "conf_fact": 0.25,
+TRTR_THRESHOLDED_PARAMS = {
+    "conf_fact": 0.50,
     "min_samples_leaf": 10,
-    "max_depth": 5,
+    "max_depth": 6,
     "threshold": 0.35,
 }
 
-TSTR_BEST_PARAMS = {
+TSTR_THRESHOLDED_PARAMS = {
     "conf_fact": 0.4,
     "min_samples_leaf": 11,
     "max_depth": 7,
     "threshold": 0.40,
 }
+
+TRTR_NO_THRESHOLD_PARAMS = {
+    "conf_fact": 0.50,
+    "min_samples_leaf": 10,
+    "max_depth": 6,
+}
+
+TSTR_NO_THRESHOLD_PARAMS = {
+    "conf_fact": 0.25,
+    "min_samples_leaf": 11,
+    "max_depth": 7,
+}
 ```
 
-These deployment settings correspond to the thresholded experiment. The non-thresholded notebook is included as a research check showing that the synthetic-augmented held-out result persists when native tree predictions are used directly.
+The default deployment run uses the thresholded settings after CV tie resolution. Passing `--no-threshold` switches to the non-thresholded settings and evaluates with native C4.5 class predictions from `tree.predict()`.
 
 The script:
 
 1. Loads deployment train/validation/test CSVs.
 2. Appends `s_train_deployment.csv` in TSTR mode.
 3. Trains a C4.5 tree on raw features.
-4. Evaluates validation and test data at the locked threshold.
+4. Evaluates validation and test data using either the locked threshold or native C4.5 predictions.
 5. Saves a pickle model package.
-6. Exports a Graphviz SVG tree to `outputs/figures/{model_stem}_full_tree.svg`.
+6. Exports a Graphviz SVG tree to `outputs/figures/{model_stem}_full_tree.svg`, for example `v1_full_tree.svg` or `v1_no_threshold_full_tree.svg`.
 7. Reloads the saved model and prints sample diagnostics for `test_deployment.csv`.
 
 Saved model packages include:
@@ -357,11 +389,13 @@ Run this from the **project root**:
 python scripts/train.py --out models/v1.pkl
 ```
 
-### 5. Generate thresholded comparison figures from the grid-search outputs:
+### 5. Generate comparison figures from the grid-search outputs:
 Run this from the **project root**:
 ```bash
 python scripts/plot_tstr_vs_trtr.py
 ```
+
+The plotting script reads both thresholded and non-thresholded grid-search outputs and regenerates the compact analysis report, validation metric comparison, selected CV metric comparison, CV distributions for F2/recall/AUC-ROC/RMSE, precision-recall trade-off, and hyperparameter trend figures.
 
 ### 6. Load and use a saved model:
 
@@ -381,6 +415,9 @@ diagnostics = tree.predict_with_diagnostics(X)
 # Probability-based classification using predict_proba
 probs = tree.predict_proba(X, positive_class=1)
 predictions = [1 if p >= threshold else 0 for p in probs]
+
+# For a non-thresholded model package, use the native tree prediction instead:
+# predictions = tree.predict(X)
 
 first = diagnostics[0]
 print(first.decision_path_readable)

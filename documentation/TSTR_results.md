@@ -63,6 +63,18 @@ In addition to F2-score (the primary selection target), the grid search now reco
 
 The primary optimization target is **F2-score**, because the screening task prioritizes recall more strongly than precision. Recall, precision, F1-score, and accuracy are retained as secondary metrics to expose the trade-off between missed At-Risk cases and false positives.
 
+## 3.1 Selection and Tie-Resolution Process
+
+The final configuration and threshold were selected in two stages:
+
+1. Run the full validation grid search and sort candidates by validation `fbeta`, then validation recall, precision, F1, and accuracy.
+2. Treat candidates as tied only when they match the top validation row across all five validation selection metrics: F2, recall, precision, F1, and accuracy.
+3. Re-evaluate only those validation-tied candidates with 5-fold stratified cross-validation. For synthetic-augmented folds, synthetic At-Risk rows are appended only to the training portion of each fold.
+4. Sort the tied-candidate CV results by `cv_mean_fbeta`, `cv_mean_recall`, `cv_mean_precision`, `cv_mean_f1`, and `cv_mean_accuracy`, then use the threshold/configuration fields as deterministic tie-breakers.
+5. Select the first row of the exported tie-CV file as the locked configuration. In the thresholded experiment, that row also supplies the locked threshold.
+
+AUC-ROC and RMSE are recorded for diagnostics and plotting, but they are not part of the selection or tie-resolution sort. This keeps the selection policy aligned with the screening objective: maximize recall-weighted classification performance while still reporting probability quality separately.
+
 ---
 
 # 4. Experiment 1: With Probability Thresholding
@@ -361,11 +373,30 @@ The recommended deployment choice depends on how strictly the final thesis metho
 
 If threshold optimization is added to the manuscript, the thresholded synthetic-augmented model is preferable because it provides a transparent screening cutoff. If the manuscript must remain closer to the original proposal, the non-thresholded synthetic-augmented model is simpler and still supports the main conclusion.
 
+## 8.4 Why the Thresholded and Non-Thresholded TSTR Trees Look the Same
+
+The thresholded and non-thresholded TSTR runs use different final decision rules, but thresholding is applied only after the tree has already been trained. In the thresholded setup, `predict_proba()` returns the leaf-level `P(At-Risk)` and the selected cutoff (`0.40`) converts that probability into a class label. This cutoff does not participate in split selection, gain-ratio calculation, or post-training pruning, so it cannot change the structure shown in the tree SVG.
+
+The two selected TSTR configurations also use different pruning confidence factors:
+
+| Regime | `conf_fact` | `min_samples_leaf` | `max_depth` | Decision rule |
+|---|---:|---:|---:|---|
+| Thresholded TSTR | 0.40 | 11 | 7 | `predict_proba() >= 0.40` |
+| Non-thresholded TSTR | 0.25 | 11 | 7 | Native `predict()` |
+
+Although `conf_fact=0.25` is more aggressive than `conf_fact=0.40`, changing the confidence factor does not guarantee a different final tree. It only changes the pessimistic error estimates used during pruning. If the subtree-versus-leaf comparison has the same outcome at each internal node under both confidence factors, the final pruned tree remains identical.
+
+For the current synthetic-augmented training data, both selected TSTR configurations made the same pruning decisions. Therefore, `outputs/figures/v1_full_tree.svg` and `outputs/figures/v1_no_threshold_full_tree.svg` can show the same split features, thresholds, sample counts, gain ratios, and leaf class distributions. The files may still differ in generated metadata or layout serialization, but the learned decision structure is the same.
+
+This also explains why the held-out TSTR test metrics are identical in this run. The learned probability outputs are the same, and the selected thresholded rule assigns the same test labels as the native tree prediction.
+
 ---
 
 # 9. Feature Importance
 
 Both experiments selected the same final synthetic-augmented tree structure and feature importance profile:
+
+The reported split importance includes only the six raw FUNA-DB task features. Derived features such as `NP`, `SN`, `AF`, `BC`, `AS`, and `PF` were retained for diagnostic scoring, but they were deliberately excluded from tree split selection. Because these derived features are deterministic combinations or contrasts of the raw task scores, allowing them into the split search would introduce redundant predictors and could increase overfitting risk on the small dataset.
 
 | Feature | Importance | Domain |
 |---|---:|---|
@@ -376,7 +407,7 @@ Both experiments selected the same final synthetic-augmented tree structure and 
 | DM | 0.0000 | Digit-Dot Matching |
 | CA | 0.0000 | Multi-Digit Addition and Subtraction |
 
-The model relies mainly on Number Comparison, Number Series, and Single-Digit Addition. Digit-Dot Matching and Complex Arithmetic were available but were not selected as split features in the final synthetic-augmented tree.
+The model relies mainly on Number Comparison, Number Series, and Single-Digit Addition. Digit-Dot Matching and Complex Arithmetic were available but were not selected as split features in the final synthetic-augmented tree. Derived diagnostic features are therefore absent from this table by design, not because they were unavailable in the deployment CSVs.
 
 If incomplete flags were included in experimental feature sets but not selected as split criteria, they can be reported as non-contributing in this trained tree. However, they should only be removed from deployment data if the deployed model and feature list are fixed to exclude them.
 
@@ -422,6 +453,15 @@ Use this wording in the results/conclusion section:
 | `outputs/grid_search/tstr_validation_tie_cv_results.csv` | CV results for tied synthetic-augmented candidates with thresholds |
 | `outputs/grid_search/trtr_validation_tie_no_threshold_cv_results.csv` | CV results for tied real-only candidates without thresholds |
 | `outputs/grid_search/tstr_validation_tie_no_threshold_cv_results.csv` | CV results for tied synthetic-augmented candidates without thresholds |
-| `outputs/figures/analysis_report.txt` | Compact summary generated by plotting script |
-| `outputs/figures/*.png` | Performance, CV distribution, and hyperparameter trend charts |
-
+| `outputs/figures/analysis_report.txt` | Compact summary generated by plotting script, covering thresholded and non-thresholded validation/CV metrics including AUC-ROC and RMSE |
+| `outputs/figures/best_performance_comparison.png` | Best validation metric comparison for thresholded and non-thresholded experiments |
+| `outputs/figures/selected_cv_metric_comparison.png` | Selected tie-candidate CV metric comparison including AUC-ROC and RMSE |
+| `outputs/figures/cv_f2_distribution.png` | CV F2 distribution across tie candidates |
+| `outputs/figures/cv_recall_distribution.png` | CV recall distribution across tie candidates |
+| `outputs/figures/cv_auc_distribution.png` | CV AUC-ROC distribution across tie candidates |
+| `outputs/figures/cv_rmse_distribution.png` | CV RMSE distribution across tie candidates |
+| `outputs/figures/precision_recall_tradeoff.png` | Thresholded precision-recall trade-off across grid-search candidates |
+| `outputs/figures/hyperparameter_trends.png` | Thresholded hyperparameter trends for F2, recall, AUC-ROC, and RMSE |
+| `outputs/figures/no_threshold_hyperparameter_trends.png` | Non-thresholded hyperparameter trends for F2, recall, AUC-ROC, and RMSE |
+| `outputs/figures/v1_full_tree.svg` | Graphviz tree visualization for the thresholded deployment model package |
+| `outputs/figures/v1_no_threshold_full_tree.svg` | Graphviz tree visualization for the non-thresholded deployment model package |

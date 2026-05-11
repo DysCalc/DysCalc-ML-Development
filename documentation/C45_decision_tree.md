@@ -109,6 +109,10 @@ Where:
 - $z = \Phi^{-1}(1 - \text{cf})$ is the z-score from the confidence factor `cf`.
 - A lower `cf` → higher $z$ → more aggressive pruning.
 
+Changing `conf_fact` does not necessarily produce a different tree. The parameter only changes the pessimistic error estimates used in the subtree-versus-leaf pruning comparison. If every internal node reaches the same keep/prune outcome under two different confidence factors, the final SVG tree structure will be identical even though the evaluated configuration values differ.
+
+Probability thresholding is separate from this pruning process. A threshold such as `P(At-Risk) >= 0.40` is applied after training to the leaf probabilities returned by `predict_proba()`. It affects the final class label used for evaluation, but it does not affect gain-ratio split selection, pruning, or the exported tree structure.
+
 ---
 
 ## Architecture
@@ -324,6 +328,8 @@ Scores are normalized to sum to 1.0.
 
 Features that are **diagnostic-only** (derived features like composite scores: NP, SN, AF, BC, AS, PF) never appear as tree split nodes because the tree is trained only on `raw_features`. These derived features receive scores via a **post-path extension**:
 
+This raw-only split policy is intentional. The derived features are deterministic functions of the same raw task scores used for model fitting, so including both raw and derived versions in split selection would give the tree multiple redundant ways to partition on the same underlying information. For the FUNA-DB sample size, that redundancy can encourage overly specific branches and weaken generalization. The implementation therefore uses raw task features for supervised fitting and reserves derived features for post-hoc diagnostic interpretation.
+
 $$
 \text{TaskImp}_{i,\text{derived}} = z_{i,\text{derived}}
 $$
@@ -408,7 +414,7 @@ DOMAIN_MAP = {
     # ... full mapping
 }
 
-raw_features = ["task_1", "task_2", "task_3", ...]  # features used for tree splits
+raw_features = ["task_1", "task_2", "task_3", ...]  # raw features used for tree splits
 
 tree = C45DecisionTree(
     max_depth=6,
@@ -449,10 +455,10 @@ for diag in diagnostics:
 
 ```python
 # Save with calibrated threshold
-tree.save_model("models/dyscalc_model.pkl", optimal_threshold=0.42)
+tree.save_model("models/<model_name/version>.pkl", optimal_threshold=0.42)
 
 # Load
-model, threshold, *_ = C45DecisionTree.load_model("models/dyscalc_model.pkl")
+model, threshold, *_ = C45DecisionTree.load_model("models/<model_name/version>.pkl")
 ```
 
 ### Inspection
