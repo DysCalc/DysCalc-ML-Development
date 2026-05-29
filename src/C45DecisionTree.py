@@ -521,15 +521,19 @@ class C45DecisionTree:
                         if domain and domain in domain_severity:
                             domain_severity[domain] += node.information_gain * z
 
-            # --- Post-path scoring for derived/diagnostic features (Eq. 3.35 extension) ---
+            # --- Post-path scoring for features with no tree gain ratio (Eq. 3.35 extension) ---
             # Derived features (NP, SN, AF, BC, AS, PF) never appear as tree split nodes,
-            # so they receive no weight from the path loop above.
-            # We score them independently using their z-score alone (weight=1.0),
-            # which measures how anomalous the student's derived value is relative
-            # to the training population — consistent with the proposal's intent that
-            # these features "enhance interpretability and capture domain-specific deficits".
-            derived_features = [f for f in self.diagnostic_features if f not in self.raw_features]
-            for feature in derived_features:
+            # and any raw features omitted from splits also contribute no gain ratio.
+            # We score these independently using their z-score alone (weight=1.0),
+            # which measures how anomalous the student's value is relative to the
+            # training population — consistent with the proposal's interpretability intent.
+            derived_set = {f for f in self.diagnostic_features if f not in self.raw_features}
+            unused_tree_set = {f for f in self.diagnostic_features if f not in self._feature_importance}
+            independent_features = [
+                f for f in self.diagnostic_features
+                if f in derived_set or f in unused_tree_set
+            ]
+            for feature in independent_features:
                 feat_stats = self.feature_stats.get(feature)
                 if feat_stats:
                     value = row[feature]

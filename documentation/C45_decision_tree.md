@@ -324,21 +324,21 @@ Similar to domain severity, but:
 
 Scores are normalized to sum to 1.0.
 
-### Derived Feature Handling
+### Derived and Unused Feature Handling
 
-Features that are **diagnostic-only** (derived features like composite scores: NP, SN, AF, BC, AS, PF) never appear as tree split nodes because the tree is trained only on `raw_features`. These derived features receive scores via a **post-path extension**:
+Features that are **diagnostic-only** (derived features like composite scores: NP, SN, AF, BC, AS, PF) never appear as tree split nodes because the tree is trained only on `raw_features`. Additionally, any feature (raw or derived) that is **unused by the fitted tree** (no gain ratio contribution) also receives scores via the same **post-path extension**:
 
 This raw-only split policy is intentional. The derived features are deterministic functions of the same raw task scores used for model fitting, so including both raw and derived versions in split selection would give the tree multiple redundant ways to partition on the same underlying information. For the FUNA-DB sample size, that redundancy can encourage overly specific branches and weaken generalization. The implementation therefore uses raw task features for supervised fitting and reserves derived features for post-hoc diagnostic interpretation.
 
 $$
-\text{TaskImp}_{i,\text{derived}} = z_{i,\text{derived}}
+	ext{TaskImp}_{i,f} = z_{i,f} \quad \text{for any } f \text{ with no tree gain ratio}
 $$
 
 $$
-DS_{i,d(\text{derived})} \mathrel{+}= z_{i,\text{derived}}
+DS_{i,d(f)} \mathrel{+}= z_{i,f}
 $$
 
-This ensures derived features contribute to the diagnostic profile proportionally to how anomalous the student's value is relative to the training population, consistent with the proposal's intent that these features "enhance interpretability and capture domain-specific deficits."
+This ensures derived features and any raw features omitted from splits contribute to the diagnostic profile proportionally to how anomalous the student's value is relative to the training population, consistent with the proposal's intent that these features "enhance interpretability and capture domain-specific deficits."
 
 ---
 
