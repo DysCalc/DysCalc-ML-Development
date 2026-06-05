@@ -1,12 +1,12 @@
 """
 train.py — Deployment Training Script
 ======================================
-Trains the final C4.5 TSTR model on the full real + synthetic training set,
+Trains the final C4.5 TRSTR model on the full real + synthetic training set,
 and saves the complete model package to disk.
 
 Usage
 -----
-    python train.py                                    # TSTR mode with thresholding
+    python train.py                                    # TRSTR mode with thresholding
     python train.py --out models/v1.pkl
     python train.py --no-synth                         # TRTR mode (real data only)
     python train.py --no-threshold                     # Native C4.5 prediction mode
@@ -84,28 +84,28 @@ LABEL_COL = "Label"
 # ─────────────────────────────────────────────
 TRTR_THRESHOLDED_PARAMS = {
     "conf_fact":        0.50,
-    "min_samples_leaf": 10,
-    "max_depth":        6,
-    "threshold":        0.35,
+    "min_samples_leaf": 22,
+    "max_depth":        15,
+    "threshold":        0.40,
 }
 
-TSTR_THRESHOLDED_PARAMS = {
-    "conf_fact":        0.4,
-    "min_samples_leaf": 11,
-    "max_depth":        7,
-    "threshold":        0.40,
+TRSTR_THRESHOLDED_PARAMS = {
+    "conf_fact":        0.50,
+    "min_samples_leaf": 39,
+    "max_depth":        15,
+    "threshold":        0.45,
 }
 
 TRTR_NO_THRESHOLD_PARAMS = {
     "conf_fact":        0.50,
-    "min_samples_leaf": 10,
-    "max_depth":        6,
+    "min_samples_leaf": 12,
+    "max_depth":        15,
 }
 
-TSTR_NO_THRESHOLD_PARAMS = {
-    "conf_fact":        0.25,
-    "min_samples_leaf": 11,
-    "max_depth":        7,
+TRSTR_NO_THRESHOLD_PARAMS = {
+    "conf_fact":        0.50,
+    "min_samples_leaf": 40,
+    "max_depth":        15,
 }
 
 # ─────────────────────────────────────────────
@@ -121,60 +121,9 @@ def split_xy(df: pd.DataFrame):
     return df[DIAGNOSTIC_FEATURES], df[LABEL_COL]
 
 
-def get_probs(tree: C45DecisionTree, X: pd.DataFrame) -> list[float]:
-    """
-    Extract P(at-risk) from diagnostic outputs.
-    Zeroes out incomplete flags from task_importance post-prediction
-    (does not affect tree split decisions).
-    """
-    diagnostics = tree.predict_with_diagnostics(X)
-    probs = []
-    for d in diagnostics:
-        total = sum(d.task_importance_scores.values())
-        if total > 0:
-            for f in d.task_importance_scores:
-                d.task_importance_scores[f] /= total
 
-        p = d.confidence if int(d.predicted_class) == 1 else 1 - d.confidence
-        probs.append(p)
-    return probs
-
-
-def compute_metrics(y_true, preds) -> dict:
-    return {
-        "recall":    recall_score(y_true, preds, zero_division=0),
-        "precision": precision_score(y_true, preds, zero_division=0),
-        "f1":        f1_score(y_true, preds, zero_division=0),
-        "f2":        fbeta_score(y_true, preds, beta=2, zero_division=0),
-        "accuracy":  accuracy_score(y_true, preds),
-    }
-
-
-def predict_for_evaluation(tree: C45DecisionTree, X: pd.DataFrame, threshold: float | None):
-    if threshold is None:
-        preds = tree.predict(X).astype(int)
-        probs = get_probs(tree, X)
-        return preds, probs
-
-    probs = get_probs(tree, X)
-    preds = [1 if p >= threshold else 0 for p in probs]
-    return preds, probs
-
-
-def print_metrics(label: str, m: dict, threshold: float | None):
-    log.info(f"── {label} ──────────────────────────────")
-    if threshold is None:
-        log.info("  Prediction: native C4.5 class output")
-    else:
-        log.info(f"  Threshold : {threshold:.2f}")
-    log.info(f"  Recall    : {m['recall']:.4f}")
-    log.info(f"  Precision : {m['precision']:.4f}")
-    log.info(f"  F1        : {m['f1']:.4f}")
-    log.info(f"  F2        : {m['f2']:.4f}")
-    log.info(f"  Accuracy  : {m['accuracy']:.4f}")
-
-def export_tree_svg(tree_model: C45DecisionTree, base_filename: str) -> None:
-    """Exports the trained tree as an SVG visualization using Graphviz."""
+def export_tree_image(tree_model: C45DecisionTree, base_filename: str) -> None:
+    """Exports the trained tree as SVG and PNG visualizations using Graphviz."""
     dot = Digraph(comment='C4.5 Decision Tree')
     dot.attr(dpi='300', nodesep='0.8', ranksep='1.2')
     dot.attr('node', shape='box', style='rounded,filled', fontname='helvetica', fontsize='14', fillcolor='#f8f9fa', margin='0.3,0.15')
@@ -212,52 +161,8 @@ def export_tree_svg(tree_model: C45DecisionTree, base_filename: str) -> None:
 
     if tree_model.tree is not None:
         add_nodes_edges(tree_model.tree, dot)
-        dot.render(base_filename, format='svg', cleanup=True)
-
-
-def demonstrate_model(model_path: str, use_thresholding: bool) -> None:
-    """Loads the saved model structure from disk, evaluates on test data, and outputs 10 diagnostics."""
-    log.info("\n" + "=" * 60)
-    log.info("Demonstrating Loaded Model on Unseen Test Set")
-    log.info("=" * 60)
-
-    # 1. Load the model from disk
-    loaded_tree, optimal_threshold, conf_fact, min_samples_leaf, max_depth, epsilon = C45DecisionTree.load_model(model_path)
-
-    # 2. Load unseen test data
-    test_df = load_csv("datasets/processed/test_deployment.csv", "test (unseen)")
-    X_test, y_test = split_xy(test_df)
-
-    # 3. Generate predictions and raw tree probabilities
-    diagnostics = loaded_tree.predict_with_diagnostics(X_test)
-    final_probs = get_probs(loaded_tree, X_test)
-
-    threshold = optimal_threshold if use_thresholding else None
-    test_preds, final_probs = predict_for_evaluation(loaded_tree, X_test, threshold)
-    test_metrics = compute_metrics(y_test, test_preds)
-
-    if use_thresholding:
-        print_metrics(f"Test metrics at locked threshold={optimal_threshold:.2f}", test_metrics, threshold)
-    else:
-        print_metrics("Test metrics with native C4.5 predictions", test_metrics, threshold)
-
-    # 5. Output Sample Diagnostics
-    log.info(f"\n[Sample Diagnostics for First 10 Tests]")
-    for i, diag in enumerate(diagnostics[:10]):
-        prob = final_probs[i]
-        pred_class = test_preds[i]
-        pred_label = "At-Risk (1)" if pred_class == 1 else "Typical (0)"
-
-        # String formatting for the task importance dictionary
-        task_imp = ", ".join([f"{k}: {v:.2f}" for k, v in diag.task_importance_scores.items() if v > 0])
-
-        log.info(f"\n  Test Case #{i+1}:")
-        log.info(f"    Raw Confidence   : {diag.confidence:.4f} (Class {diag.predicted_class})")
-        log.info(f"    P(at-risk)       : {prob:.4f}")
-        log.info(f"    Final Prediction : {pred_label}")
-        log.info(f"    Decision Path    : {diag.decision_path_readable}")
-        log.info(f"    Domain Severity  : {diag.domain_severity_scores}")
-        log.info(f"    Task Importance  : {task_imp if task_imp else 'N/A'}")
+        dot.render(base_filename, format='svg', cleanup=False)
+        dot.render(base_filename, format='png', cleanup=True)
 
 
 # ─────────────────────────────────────────────
@@ -269,23 +174,26 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
     log.info("=" * 60)
 
     # ── 1. Load data ──────────────────────────────────────────
-    log.info("\n[1/6] Loading datasets...")
-    r_train = load_csv("datasets/processed/train_deployment.csv", "real train")
-    val_df  = load_csv("datasets/processed/val_deployment.csv",   "validation")
-    test_df = load_csv("datasets/processed/test_deployment.csv",  "test")
+    log.info("\n[1/3] Loading datasets...")
+    r_train = load_csv("../datasets/processed/deployment/train_deployment.csv", "real train")
+    val_df  = load_csv("../datasets/processed/deployment/val_deployment.csv",   "validation")
+    test_df = load_csv("../datasets/processed/deployment/test_deployment.csv",  "test")
+
+    # Combine all real data into a single training set
+    r_full = pd.concat([r_train, val_df, test_df], ignore_index=True)
 
     if use_synth:
-        s_train  = load_csv("datasets/processed/s_train_deployment.csv", "synthetic train")
-        train_df = pd.concat([r_train, s_train], ignore_index=True)
-        mode     = "Synthetic-Augmented (TSTR)"
+        s_train  = load_csv("../datasets/processed/deployment/s_full_deployment.csv", "synthetic train")
+        train_df = pd.concat([r_full, s_train], ignore_index=True)
+        mode     = "Synthetic-Augmented (TRSTR) Full"
         params   = (
-            TSTR_THRESHOLDED_PARAMS.copy()
+            TRSTR_THRESHOLDED_PARAMS.copy()
             if use_thresholding
-            else TSTR_NO_THRESHOLD_PARAMS.copy()
+            else TRSTR_NO_THRESHOLD_PARAMS.copy()
         )
     else:
-        train_df = r_train.copy()
-        mode     = "Real-Only (TRTR)"
+        train_df = r_full.copy()
+        mode     = "Real-Only (TRTR) Full"
         params   = (
             TRTR_THRESHOLDED_PARAMS.copy()
             if use_thresholding
@@ -301,36 +209,43 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
 
     log.info(f"Mode         : {mode}")
     log.info(f"Prediction   : {prediction_rule}")
-    log.info(f"Train shape  : {train_df.shape}")
-    log.info(f"Val shape    : {val_df.shape}")
-    log.info(f"Test shape   : {test_df.shape}")
+    log.info(f"Combined Train shape: {train_df.shape}")
 
     X_train, y_train = split_xy(train_df)
-    X_val,   y_val   = split_xy(val_df)
-    X_test,  y_test  = split_xy(test_df)
 
     # ── 2. Train tree ─────────────────────────────────────────
-    log.info("\n[2/6] Training C4.5 decision tree...")
+    log.info("\n[2/3] Training C4.5 decision tree...")
     tree = C45DecisionTree(**params, feature_domain_mapping=DOMAIN_MAPPING)
     tree.fit(X_train, y_train, raw_features=RAW_FEATURES)
 
     log.info(f"Tree depth  : {tree.get_depth()}")
     log.info(f"Tree leaves : {tree.get_leaves_num()}")
 
-    # ── 3. Evaluate validation set ────────────────────────────
-    log.info("\n[3/6] Evaluating validation set...")
-    val_preds, _ = predict_for_evaluation(tree, X_val, threshold)
-    val_metrics = compute_metrics(y_val, val_preds)
-    print_metrics("Validation metrics", val_metrics, threshold)
+    # ── 2.5 Feature Importance ────────────────────────────────
+    importances = tree.get_feature_importance()
+    log.info("\nGlobal Feature Importances:")
+    for feat, imp in sorted(importances.items(), key=lambda x: x[1], reverse=True):
+        log.info(f"  {feat:<5}: {imp:.4f}")
 
-    # ── 4. Evaluate test set ──────────────────────────────────
-    log.info("\n[4/6] Evaluating held-out test set...")
-    test_preds, _ = predict_for_evaluation(tree, X_test, threshold)
-    test_metrics = compute_metrics(y_test, test_preds)
-    print_metrics("Test metrics", test_metrics, threshold)
+    try:
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        fig, ax = plt.subplots(figsize=(8, 5))
+        sorted_idx = pd.Series(importances).sort_values(ascending=False)
+        sns.barplot(x=sorted_idx.values, y=list(sorted_idx.index), ax=ax, palette="viridis")
+        ax.set_title("Global Feature Importance (C4.5 Gain Ratio)")
+        ax.set_xlabel("Normalized Importance")
+        plt.tight_layout()
+        fi_out = Path("outputs/figures/deployment") / f"{Path(out_path).stem}_feature_importance.png"
+        fi_out.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(fi_out, dpi=300)
+        plt.close()
+        log.info(f"Feature importance plot saved → {fi_out}")
+    except ImportError:
+        log.warning("matplotlib or seaborn not installed; skipping feature importance plot.")
 
-    # ── 5. Save model ─────────────────────────────────────────
-    log.info("\n[5/6] Saving model...")
+    # ── 3. Save model & Visualization ─────────────────────────
+    log.info("\n[3/3] Saving model and visualization...")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -340,14 +255,12 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
         log.info("Saved threshold 0.50 for package compatibility; this run used native C4.5 predictions.")
     log.info(f"Model saved → {out.resolve()}")
     
-    # ── 6. Save Tree Visualization ────────────────────────────
-    log.info("\n[6/6] Saving tree visualization...")
-    fig_dir = Path("outputs/figures")
+    fig_dir = Path("outputs/figures/deployment")
     fig_dir.mkdir(parents=True, exist_ok=True)
     svg_base = fig_dir / f"{out.stem}_full_tree"
     
-    export_tree_svg(tree, str(svg_base))
-    log.info(f"Tree visualization saved → {svg_base}.svg")
+    export_tree_image(tree, str(svg_base))
+    log.info(f"Tree visualizations saved → {svg_base}.svg and {svg_base}.png")
     
     log.info("\nDone.")
 
@@ -365,7 +278,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-synth",
         action="store_true",
-        help="Train on real data only (TRTR mode). Default is TSTR (real + synthetic).",
+        help="Train on real data only (TRTR mode). Default is TRSTR (real + synthetic).",
     )
     parser.add_argument(
         "--no-threshold",
@@ -377,7 +290,6 @@ if __name__ == "__main__":
     try:
         use_thresholding = not args.no_threshold
         train(out_path=args.out, use_synth=not args.no_synth, use_thresholding=use_thresholding)
-        demonstrate_model(model_path=args.out, use_thresholding=use_thresholding)
     except FileNotFoundError as e:
         log.error(f"Dataset not found: {e}")
         sys.exit(1)

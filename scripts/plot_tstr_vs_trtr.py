@@ -19,8 +19,8 @@ EXPERIMENTS = [
     {
         "key": "thresholded",
         "label": "Thresholded",
-        "grid_suffix": "",
-        "tie_suffix": "",
+        "grid_suffix": "_thresholded",
+        "tie_suffix": "_thresholded",
         "has_threshold": True,
     },
     {
@@ -34,12 +34,12 @@ EXPERIMENTS = [
 
 CONDITION_LABELS = {
     "trtr": "TRTR (Real Only)",
-    "tstr": "TSTR (Synthetic-Augmented)",
+    "trstr": "TRSTR (Synthetic-Augmented)",
 }
 
 CONDITION_COLORS = {
     "trtr": "#5DADE2",
-    "tstr": "#E74C3C",
+    "trstr": "#E74C3C",
 }
 
 
@@ -63,9 +63,9 @@ def load_data(base_dir):
         data[key] = {
             "meta": experiment,
             "trtr_grid": load_csv(grid_dir / f"trtr{grid_suffix}_grid_search_results.csv"),
-            "tstr_grid": load_csv(grid_dir / f"tstr{grid_suffix}_grid_search_results.csv"),
-            "trtr_tie": load_csv(grid_dir / f"trtr_validation_tie{tie_suffix}_cv_results.csv"),
-            "tstr_tie": load_csv(grid_dir / f"tstr_validation_tie{tie_suffix}_cv_results.csv"),
+            "trstr_grid": load_csv(grid_dir / f"trstr{grid_suffix}_grid_search_results.csv"),
+            "trtr_tie": load_csv(grid_dir / f"trtr{tie_suffix}_validation_tie_cv_results.csv"),
+            "trstr_tie": load_csv(grid_dir / f"trstr{tie_suffix}_validation_tie_cv_results.csv"),
         }
 
     return data
@@ -98,53 +98,53 @@ def format_metric_with_std(mean_value, std_value):
     return f"{mean_value:.4f} +/- {std_value:.4f}"
 
 
-def write_validation_summary(report, experiment_label, trtr_row, tstr_row):
+def write_validation_summary(report, experiment_label, trtr_row, trstr_row):
     report.write(f"\n=== {experiment_label}: Best Validation Grid-Search Rows ===\n")
-    if trtr_row is None or tstr_row is None:
-        report.write("Validation grid-search results are missing for TRTR or TSTR.\n")
+    if trtr_row is None or trstr_row is None:
+        report.write("Validation grid-search results are missing for TRTR or TRSTR.\n")
         return
 
-    threshold_label = " | Threshold" if "threshold" in trtr_row.index or "threshold" in tstr_row.index else ""
+    threshold_label = " | Threshold" if "threshold" in trtr_row.index or "threshold" in trstr_row.index else ""
     report.write(f"Condition | {' | '.join(label for _, label, _ in METRICS)}{threshold_label}\n")
     report.write(f"{'-' * 9} | {' | '.join('-' * len(label) for _, label, _ in METRICS)}")
     if threshold_label:
         report.write(" | ---------")
     report.write("\n")
 
-    for condition, row in [("TRTR", trtr_row), ("TSTR", tstr_row)]:
+    for condition, row in [("TRTR", trtr_row), ("TRSTR", trstr_row)]:
         values = [format_metric(row[col]) for col, _, _ in METRICS]
         report.write(f"{condition} | {' | '.join(values)}")
         if threshold_label:
             report.write(f" | {format_metric(row.get('threshold', float('nan')))}")
         report.write("\n")
 
-    deltas = [tstr_row[col] - trtr_row[col] for col, _, _ in METRICS]
+    deltas = [trstr_row[col] - trtr_row[col] for col, _, _ in METRICS]
     report.write(f"Delta | {' | '.join(format_metric(delta) for delta in deltas)}")
     if threshold_label:
         report.write(" |")
     report.write("\n")
 
 
-def write_cv_summary(report, experiment_label, trtr_row, tstr_row):
+def write_cv_summary(report, experiment_label, trtr_row, trstr_row):
     report.write(f"\n=== {experiment_label}: Selected Tie-Candidate CV Performance ===\n")
-    if trtr_row is None or tstr_row is None:
-        report.write("Tie CV results are missing for TRTR or TSTR.\n")
+    if trtr_row is None or trstr_row is None:
+        report.write("Tie CV results are missing for TRTR or TRSTR.\n")
         return
 
-    report.write("Metric | TRTR mean +/- std | TSTR mean +/- std | Delta\n")
+    report.write("Metric | TRTR mean +/- std | TRSTR mean +/- std | Delta\n")
     report.write("------ | ----------------- | ----------------- | -----\n")
     for metric_col, metric_label, _ in METRICS:
         mean_col = f"cv_mean_{metric_col}"
         std_col = f"cv_std_{metric_col}"
         trtr_mean = trtr_row.get(mean_col, float("nan"))
         trtr_std = trtr_row.get(std_col, float("nan"))
-        tstr_mean = tstr_row.get(mean_col, float("nan"))
-        tstr_std = tstr_row.get(std_col, float("nan"))
+        trstr_mean = trstr_row.get(mean_col, float("nan"))
+        trstr_std = trstr_row.get(std_col, float("nan"))
         report.write(
             f"{metric_label} | "
             f"{format_metric_with_std(trtr_mean, trtr_std)} | "
-            f"{format_metric_with_std(tstr_mean, tstr_std)} | "
-            f"{format_metric(tstr_mean - trtr_mean)}\n"
+            f"{format_metric_with_std(trstr_mean, trstr_std)} | "
+            f"{format_metric(trstr_mean - trtr_mean)}\n"
         )
 
 
@@ -160,20 +160,20 @@ def write_analysis_report(data, output_dir):
             report.write(
                 f"- {label}: "
                 f"TRTR grid={len(experiment_data['trtr_grid'])}, "
-                f"TSTR grid={len(experiment_data['tstr_grid'])}, "
+                f"TRSTR grid={len(experiment_data['trstr_grid'])}, "
                 f"TRTR tie CV={len(experiment_data['trtr_tie'])}, "
-                f"TSTR tie CV={len(experiment_data['tstr_tie'])}\n"
+                f"TRSTR tie CV={len(experiment_data['trstr_tie'])}\n"
             )
 
         for experiment_key, experiment_data in data.items():
             label = experiment_data["meta"]["label"]
             trtr_best = best_validation_row(experiment_data["trtr_grid"])
-            tstr_best = best_validation_row(experiment_data["tstr_grid"])
+            trstr_best = best_validation_row(experiment_data["trstr_grid"])
             trtr_cv = selected_cv_row(experiment_data["trtr_tie"])
-            tstr_cv = selected_cv_row(experiment_data["tstr_tie"])
+            trstr_cv = selected_cv_row(experiment_data["trstr_tie"])
 
-            write_validation_summary(report, label, trtr_best, tstr_best)
-            write_cv_summary(report, label, trtr_cv, tstr_cv)
+            write_validation_summary(report, label, trtr_best, trstr_best)
+            write_cv_summary(report, label, trtr_cv, trstr_cv)
 
         report.write("\nMetric note: RMSE is lower-is-better; all other listed metrics are higher-is-better.\n")
 
@@ -184,7 +184,7 @@ def build_validation_plot_data(data):
     rows = []
     for experiment_key, experiment_data in data.items():
         experiment_label = experiment_data["meta"]["label"]
-        for condition_key in ["trtr", "tstr"]:
+        for condition_key in ["trtr", "trstr"]:
             row = best_validation_row(experiment_data[f"{condition_key}_grid"])
             if row is None:
                 continue
@@ -204,7 +204,7 @@ def build_selected_cv_plot_data(data):
     rows = []
     for experiment_key, experiment_data in data.items():
         experiment_label = experiment_data["meta"]["label"]
-        for condition_key in ["trtr", "tstr"]:
+        for condition_key in ["trtr", "trstr"]:
             row = selected_cv_row(experiment_data[f"{condition_key}_tie"])
             if row is None:
                 continue
@@ -236,7 +236,7 @@ def plot_metric_comparison(plot_data, output_path, title):
             x="Metric",
             y="Value",
             hue="Condition",
-            palette=[CONDITION_COLORS["trtr"], CONDITION_COLORS["tstr"]],
+            palette=[CONDITION_COLORS["trtr"], CONDITION_COLORS["trstr"]],
             ax=ax,
         )
         ax.set_title(experiment)
@@ -255,16 +255,16 @@ def plot_metric_comparison(plot_data, output_path, title):
 
 def plot_precision_recall_tradeoff(experiment_data, output_dir):
     trtr_grid = experiment_data["trtr_grid"]
-    tstr_grid = experiment_data["tstr_grid"]
-    if trtr_grid.empty or tstr_grid.empty:
+    trstr_grid = experiment_data["trstr_grid"]
+    if trtr_grid.empty or trstr_grid.empty:
         return
 
     trtr_best = best_validation_row(trtr_grid)
-    tstr_best = best_validation_row(tstr_grid)
+    trstr_best = best_validation_row(trstr_grid)
 
     plt.figure(figsize=(10, 6))
     trtr_sample = trtr_grid.sample(n=min(5000, len(trtr_grid)), random_state=42)
-    tstr_sample = tstr_grid.sample(n=min(5000, len(tstr_grid)), random_state=42)
+    trstr_sample = trstr_grid.sample(n=min(5000, len(trstr_grid)), random_state=42)
 
     plt.scatter(
         trtr_sample["recall"],
@@ -276,11 +276,11 @@ def plot_precision_recall_tradeoff(experiment_data, output_dir):
         s=15,
     )
     plt.scatter(
-        tstr_sample["recall"],
-        tstr_sample["precision"],
-        c=CONDITION_COLORS["tstr"],
+        trstr_sample["recall"],
+        trstr_sample["precision"],
+        c=CONDITION_COLORS["trstr"],
         alpha=0.5,
-        label=CONDITION_LABELS["tstr"],
+        label=CONDITION_LABELS["trstr"],
         marker="x",
         s=15,
     )
@@ -295,12 +295,12 @@ def plot_precision_recall_tradeoff(experiment_data, output_dir):
         marker="*",
     )
     plt.scatter(
-        [tstr_best["recall"]],
-        [tstr_best["precision"]],
+        [trstr_best["recall"]],
+        [trstr_best["precision"]],
         color="#922B21",
         edgecolors="black",
         s=150,
-        label="TSTR Best F2",
+        label="TRSTR Best F2",
         marker="*",
     )
 
@@ -318,7 +318,7 @@ def build_cv_distribution_data(data):
     rows = []
     for experiment_key, experiment_data in data.items():
         experiment_label = experiment_data["meta"]["label"]
-        for condition_key in ["trtr", "tstr"]:
+        for condition_key in ["trtr", "trstr"]:
             tie_results = experiment_data[f"{condition_key}_tie"]
             if tie_results.empty:
                 continue
@@ -365,8 +365,8 @@ def plot_cv_distributions(data, output_dir):
 
 def plot_hyperparameter_trends(experiment_data, output_path, title):
     trtr_grid = experiment_data["trtr_grid"]
-    tstr_grid = experiment_data["tstr_grid"]
-    if trtr_grid.empty or tstr_grid.empty:
+    trstr_grid = experiment_data["trstr_grid"]
+    if trtr_grid.empty or trstr_grid.empty:
         return
 
     configs = ["max_depth", "min_samples_leaf", "conf_fact"]
@@ -378,7 +378,7 @@ def plot_hyperparameter_trends(experiment_data, output_path, title):
 
     for i, config in enumerate(configs):
         ax = axes[i]
-        for condition_key, grid in [("trtr", trtr_grid), ("tstr", tstr_grid)]:
+        for condition_key, grid in [("trtr", trtr_grid), ("trstr", trstr_grid)]:
             color = CONDITION_COLORS[condition_key]
             condition_label = condition_key.upper()
 
@@ -396,7 +396,7 @@ def plot_hyperparameter_trends(experiment_data, output_path, title):
                 )
                 linestyle = "-" if metric_col in ["fbeta", "auc"] else "--"
                 marker = "o" if metric_col in ["fbeta", "recall"] else "s"
-                alpha = 0.85 if condition_key == "tstr" else 0.55
+                alpha = 0.85 if condition_key == "trstr" else 0.55
                 ax.plot(
                     trend[config],
                     trend[metric_col],
