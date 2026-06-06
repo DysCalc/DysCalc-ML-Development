@@ -326,15 +326,15 @@ metadata.detect_from_dataframe(df_min_all)
 # Hyperparameter search grid.
 # Each entry: (MULTIPLIER, epochs, batch_size, gen_lr, disc_lr)
 GAN_SEARCH_GRID = [
-    # ( 7, 2000, 500, 2e-4, 2e-4),   # baseline
-    # (10, 2000, 500, 2e-4, 2e-4),   # bigger pool
-    # (10, 3000, 500, 2e-4, 2e-4),   # more epochs
-    # (10, 3000, 100, 2e-4, 2e-4),   # smaller batch
-    # (15, 3000, 100, 1e-4, 1e-4),   # lower LR
+    ( 7, 2000, 500, 2e-4, 2e-4),   # baseline
+    (10, 2000, 500, 2e-4, 2e-4),   # bigger pool
+    (10, 3000, 500, 2e-4, 2e-4),   # more epochs
+    (10, 3000, 100, 2e-4, 2e-4),   # smaller batch
+    (15, 3000, 100, 1e-4, 1e-4),   # lower LR
     (15, 5000, 100, 1e-4, 1e-4),   # high epochs
-    # (20, 5000, 100, 1e-4, 1e-4),   # max effort
-    # (30, 5000, 100, 1e-4, 1e-4),   # very high effort
-    # (50, 5000, 100, 1e-4, 1e-4),   # extreme effort
+    (20, 5000, 100, 1e-4, 1e-4),   # max effort
+    (30, 5000, 100, 1e-4, 1e-4),   # very high effort
+    (50, 5000, 100, 1e-4, 1e-4),   # extreme effort
 ]
 
 # Default thresholds for the statistical measurements
