@@ -83,28 +83,28 @@ LABEL_COL = "Label"
 # Hyperparameters  (fixed from evaluation)
 # ─────────────────────────────────────────────
 TRTR_THRESHOLDED_PARAMS = {
-    "conf_fact":        0.50,
-    "min_samples_leaf": 22,
+    "conf_fact":        0.45,
+    "min_samples_leaf": 10,
+    "max_depth":        15,
+    "threshold":        0.35,
+}
+
+TRSTR_THRESHOLDED_PARAMS = {
+    "conf_fact":        0.1,
+    "min_samples_leaf": 15,
     "max_depth":        15,
     "threshold":        0.40,
 }
 
-TRSTR_THRESHOLDED_PARAMS = {
-    "conf_fact":        0.50,
-    "min_samples_leaf": 39,
-    "max_depth":        15,
-    "threshold":        0.45,
-}
-
 TRTR_NO_THRESHOLD_PARAMS = {
     "conf_fact":        0.50,
-    "min_samples_leaf": 12,
+    "min_samples_leaf": 10,
     "max_depth":        15,
 }
 
 TRSTR_NO_THRESHOLD_PARAMS = {
-    "conf_fact":        0.50,
-    "min_samples_leaf": 40,
+    "conf_fact":        0.1,
+    "min_samples_leaf": 15,
     "max_depth":        15,
 }
 

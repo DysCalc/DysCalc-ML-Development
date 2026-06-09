@@ -1,0 +1,2 @@
+n_real_at_risk,n_synthetic_at_risk,n_shared_features,wasserstein_mean,wasserstein_median,nndr_mean,nndr_median,dcr_mean,dcr_median,identical_match_rate_pct
+78,65,12,0.18702377942658321,0.1940899882130014,0.8370015272741269,0.8739534692469637,1.7032039014370626,1.760365154776711,0.0
