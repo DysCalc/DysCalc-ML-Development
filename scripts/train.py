@@ -28,7 +28,8 @@ import sys
 import os
 from pathlib import Path
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(ROOT_DIR))
 
 import pandas as pd
 from graphviz import Digraph
@@ -175,15 +176,15 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
 
     # ── 1. Load data ──────────────────────────────────────────
     log.info("\n[1/3] Loading datasets...")
-    r_train = load_csv("../datasets/processed/deployment/train_deployment.csv", "real train")
-    val_df  = load_csv("../datasets/processed/deployment/val_deployment.csv",   "validation")
-    test_df = load_csv("../datasets/processed/deployment/test_deployment.csv",  "test")
+    r_train = load_csv(str(ROOT_DIR / "datasets/processed/deployment/train_deployment.csv"), "real train")
+    val_df  = load_csv(str(ROOT_DIR / "datasets/processed/deployment/val_deployment.csv"),   "validation")
+    test_df = load_csv(str(ROOT_DIR / "datasets/processed/deployment/test_deployment.csv"),  "test")
 
     # Combine all real data into a single training set
     r_full = pd.concat([r_train, val_df, test_df], ignore_index=True)
 
     if use_synth:
-        s_train  = load_csv("../datasets/processed/deployment/s_full_deployment.csv", "synthetic train")
+        s_train  = load_csv(str(ROOT_DIR / "datasets/processed/deployment/s_full_deployment.csv"), "synthetic train")
         train_df = pd.concat([r_full, s_train], ignore_index=True)
         mode     = "Synthetic-Augmented (TRSTR) Full"
         params   = (
@@ -236,7 +237,7 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
         ax.set_title("Global Feature Importance (C4.5 Gain Ratio)")
         ax.set_xlabel("Normalized Importance")
         plt.tight_layout()
-        fi_out = Path("outputs/figures/deployment") / f"{Path(out_path).stem}_feature_importance.png"
+        fi_out = ROOT_DIR / "outputs/figures/deployment" / f"{Path(out_path).stem}_feature_importance.png"
         fi_out.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(fi_out, dpi=300)
         plt.close()
@@ -255,7 +256,7 @@ def train(out_path: str, use_synth: bool, use_thresholding: bool) -> None:
         log.info("Saved threshold 0.50 for package compatibility; this run used native C4.5 predictions.")
     log.info(f"Model saved → {out.resolve()}")
     
-    fig_dir = Path("outputs/figures/deployment")
+    fig_dir = ROOT_DIR / "outputs/figures/deployment"
     fig_dir.mkdir(parents=True, exist_ok=True)
     svg_base = fig_dir / f"{out.stem}_full_tree"
     
@@ -272,7 +273,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train and save the FunaDB C4.5 deployment model.")
     parser.add_argument(
         "--out",
-        default="models/funa_c45.pkl",
+        default=str(ROOT_DIR / "models/funa_c45.pkl"),
         help="Output path for the saved model package (default: models/funa_c45.pkl)",
     )
     parser.add_argument(

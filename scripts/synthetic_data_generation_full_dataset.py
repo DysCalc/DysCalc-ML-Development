@@ -24,7 +24,7 @@ EPSILON = 1e-9
 RAW_FEATURES = ['NC', 'DM', 'NS', 'ADD', 'SUB', 'CA']
 GAN_FEATURES = RAW_FEATURES + ['BC']   # BC included so GAN learns ADD/SUB/CA joint
 DERIVED_FEATURES = ['NP', 'SN', 'AF', 'BC', 'AS', 'PF']
-ROOT_DIR = Path('..')
+ROOT_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = ROOT_DIR / 'datasets' / 'processed'
 os.makedirs(DATASETS_DIR, exist_ok=True)
 OUTPUTS_DIR = ROOT_DIR / 'outputs' / 'logs_and_metrics' / 'deployment'
@@ -68,6 +68,7 @@ except json.JSONDecodeError:
     print(f"Invalid JSON format: {OUTPUTS_DIR.parent / 'missing_rates.json'}")
 except ValueError as err:
     print(f"Invalid missing-rate schema: {err}")
+    
 def set_seed(seed):
     """Global seed for full reproducibility."""
     os.environ['PYTHONHASHSEED'] = str(seed)
