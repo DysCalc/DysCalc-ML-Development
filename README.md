@@ -1,6 +1,6 @@
-# Dyscalculia Risk Screening - C4.5 TSTR Pipeline
+# DysCalc-ML: Interpretable Dyscalculia Risk Screening via Synthetic-Augmented C4.5 Decision Trees
 
-A machine learning pipeline for early dyscalculia risk screening using a custom C4.5 decision tree and synthetic minority augmentation. The project uses the FunaDB numeracy dataset to classify students as **At-Risk (`1`)** or **Typical (`0`)** from six numeracy task scores, with per-prediction diagnostics for interpretability.
+An end-to-end machine learning pipeline designed for early dyscalculia risk screening. This project leverages the FunaDB numeracy dataset to train a custom-built, interpretable C4.5 decision tree. By utilizing six core numeracy task scores, the model classifies students as **At-Risk (`1`)** or **Typical (`0`)**. To address class imbalance, the pipeline incorporates a robust Generative Adversarial Network (GAN) architecture for synthetic minority data augmentation (TRSTR validation). The final model provides fully transparent decision rules and individualized diagnostic profiling for every prediction.
 
 ---
 
@@ -12,16 +12,20 @@ DysCalc-ML-Development/
 |   |-- raw/
 |   |   `-- FUNADB_rawdata_SUPPL.csv
 |   `-- processed/
-|       |-- FUNADB_labled.csv
+|       |-- deployment/
+|       |   |-- s_full_deployment.csv
+|       |   |-- test_deployment.csv
+|       |   |-- train_deployment.csv
+|       |   `-- val_deployment.csv
 |       |-- cleaned_dataset.csv
-|       |-- train.csv
-|       |-- val.csv
-|       |-- test.csv
+|       |-- cleaned_test.csv
+|       |-- cleaned_train.csv
+|       |-- cleaned_val.csv
+|       |-- FUNADB_labled.csv
 |       |-- s_train.csv
-|       |-- train_deployment.csv
-|       |-- val_deployment.csv
-|       |-- test_deployment.csv
-|       `-- s_full_deployment.csv
+|       |-- test.csv
+|       |-- train.csv
+|       `-- val.csv
 |-- documentation/
 |   |-- C45_decision_tree.md
 |   |-- DysCalc_ML_Validation_Pipeline.md
@@ -29,8 +33,11 @@ DysCalc-ML-Development/
 |   |-- synthetic_data_generation_full_dataset.md
 |   `-- train.md
 |-- models/
-|   |-- v1.pkl
-|   `-- v1_no_threshold.pkl
+|   |-- funa_c45.pkl
+|   |-- TRSTR_no_threshold_model.pkl
+|   |-- TRSTR_thresholded_model.pkl
+|   |-- TRTR_no_threshold_model.pkl
+|   `-- TRTR_thresholded_model.pkl
 |-- notebooks/
 |   `-- DysCalc_ML_Validation_Pipeline.ipynb
 |-- outputs/
@@ -212,10 +219,10 @@ python scripts/train.py --no-synth
 python scripts/train.py --no-threshold
 
 # Custom output path
-python scripts/train.py --out models/v1.pkl
+python scripts/train.py --out models/funa_c45.pkl
 
 # Save the evaluated non-thresholded deployment package
-python scripts/train.py --no-threshold --out models/v1_no_threshold.pkl
+python scripts/train.py --no-threshold --out models/TRSTR_no_threshold_model.pkl
 ```
 
 Current selected parameters in `scripts/train.py`:
